@@ -7,6 +7,9 @@ const TOOL_NAMES = [
   "execute_readonly_sql",
   "search_database_metadata",
   "search_rows_by_meaning",
+  "suggest_comment_sql",
+  "start_row_labeling",
+  "get_row_labeling_job",
 ];
 const USER_FIELDS =
   "_id role tenantId kaiAccount.status deleted deletedAt disabled active";

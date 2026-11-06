@@ -13,7 +13,7 @@ patch(
 patch(
   "/app/api/server/index.js",
   "  app.use('/api/auth', preAuthTenantMiddleware, routes.auth);",
-  "  app.use('/api/internal/warehouse-user', require('/app/kai-platform/routes.cjs').internalWarehouseRouter);\n  app.use('/activate-account', require('/app/kai-platform/routes.cjs').activationRouter);\n  app.use('/api/auth', preAuthTenantMiddleware, routes.auth);",
+  "  app.use('/api/internal/warehouse-user', require('/app/kai-platform/routes.cjs').internalWarehouseRouter);\n  app.use('/activate-account', require('/app/kai-platform/routes.cjs').activationRouter);\n  app.use('/api/kai-jobs', require('/app/kai-platform/routes.cjs').jobsRouter);\n  app.use('/api/auth', preAuthTenantMiddleware, routes.auth);",
 );
 patch(
   "/app/api/server/middleware/requireJwtAuth.js",

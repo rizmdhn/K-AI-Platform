@@ -141,7 +141,7 @@ let step = "launch";
     await selector.waitFor();
     assert.match(await selector.textContent(), /Umum/);
     await selector.click();
-    assert.equal(await chat.getByText('K-AI platform - CH', {exact:true}).count(),0);
+    assert.equal(await chat.getByText('K-AI Analis Data', {exact:true}).count(),0);
     await chat.keyboard.press('Escape');
     step = 'CH requires active binding in UI and API';
     const auth = await context.request.post('http://localhost:3080/api/auth/login', {data:{email:fixture.email,password:fixture.password}});

@@ -22,7 +22,7 @@ const { provisionManagedAgents } = require('/app/kai-platform/managed_agent_setu
   const deps = createAdapter({ db, mongoose, permissions: require('~/server/services/PermissionService'), capabilities: require('~/server/middleware/roles/capabilities'), configService, api, native, nanoid: require('nanoid').nanoid, brand: 'Fixture', beforeWrite: async () => { writes++; } });
   const first = await provisionManagedAgents(String(owner._id), deps);
   assert.deepEqual(first.general.tools, ['file_search']);
-  assert.equal(first.warehouse.tools.length, 7);
+  assert.equal(first.warehouse.tools.length, 10);
   assert.ok((await db.getAgentVersions({ id: first.general.id })).length);
   const before = writes;
   const second = await provisionManagedAgents(String(owner._id), deps);

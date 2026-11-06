@@ -132,4 +132,7 @@ internalWarehouseRouter.get("/:id", async (req, res) => {
     errorResponse(res, error);
   }
 });
-module.exports = { installAdmin, activationRouter, internalWarehouseRouter };
+// AF-02 CSV download of a bulk labelling job (signed link, see job_download.cjs).
+const jobsRouter = express.Router();
+jobsRouter.get("/:file", require("./job_download.cjs").createJobDownload());
+module.exports = { installAdmin, activationRouter, internalWarehouseRouter, jobsRouter };

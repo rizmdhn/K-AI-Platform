@@ -57,6 +57,11 @@ services:
       KAI_BINDING_DSN: ${KAI_BINDING_DSN:-}
       KAI_BINDING_KEY_DIR: ${KAI_BINDING_KEY_DIR:-/run/kai-binding-keys}
       KAI_LIBRECHAT_ISSUER: ${KAI_LIBRECHAT_ISSUER:-librechat-local}
+      
+      # a key saved only in the Admin Panel is not visible here. Empty key = the tool says it is not configured.
+      KAI_BATCH_MODEL_BASE_URL: ${KAI_BATCH_MODEL_BASE_URL:-https://ollama.com/v1}
+      KAI_BATCH_MODEL: ${KAI_BATCH_MODEL:-gpt-oss:120b}
+      KAI_BATCH_MODEL_API_KEY: ${KAI_BATCH_MODEL_API_KEY:-${OLLAMA_API_KEY:-}}
       # Local bge-m3 for search_database_metadata; unreachable (documents profile off) = keyword ranking.
       KAI_EMBEDDINGS_URL: "${KAI_EMBEDDINGS_BASE_URL:-http://embeddings:8080/v1}/embeddings"
       # P6-11: audit lines also go to /var/log/kai/audit.jsonl, rotated daily, kept N days.

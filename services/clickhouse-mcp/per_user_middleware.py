@@ -37,6 +37,8 @@ from result_limiter import ResultLimitError, limit_result
 from schema_tool import get_table_schema
 from metadata_search import search_database_metadata
 from row_search import search_rows_by_meaning
+from comment_sql import suggest_comment_sql
+from batch_jobs import get_row_labeling_job, register_job_routes, start_row_labeling
 from sql_tool import execute_readonly_sql
 from sql_policy import UnsafeSQL, validate
 from tool_errors import ERROR_OUTCOMES, GatewayError, error_payload
@@ -66,6 +68,8 @@ def attach_audit_file(directory):
 if os.getenv("KAI_AUDIT_LOG_DIR"):
     attach_audit_file(os.environ["KAI_AUDIT_LOG_DIR"])
 SQL_FIELDS = {"run_query": "query", "execute_readonly_sql": "sql", "search_rows_by_meaning": "sql"}
+# Tools that also carry SQL (policy check + audit hash) but return no query rows, so no result limiting.
+CHECKED_SQL_FIELDS = {**SQL_FIELDS, "start_row_labeling": "sql"}
 # Server-side ceilings sent with every query (P3-03). The DBA settings profile stays authoritative:
 # any of these it locks (CONST/readonly) is dropped below and the profile value applies.
 QUERY_LIMITS = {
@@ -122,7 +126,7 @@ class PerUserClickHouse(Middleware):
             if managed
             else (_header(headers, "x-ch-user"), _header(headers, "x-ch-password"))
         )
-        query = args.get(SQL_FIELDS[tool]) if tool in SQL_FIELDS else None
+        query = args.get(CHECKED_SQL_FIELDS[tool]) if tool in CHECKED_SQL_FIELDS else None
         record = {
             "request_id": uuid.uuid4().hex,
             "tool": tool,
@@ -156,7 +160,7 @@ class PerUserClickHouse(Middleware):
                     "INVALID_ARGUMENT",
                     "Exactly sql and purpose are required; identity and other fields are not accepted.",
                 )
-            if tool in SQL_FIELDS:
+            if tool in CHECKED_SQL_FIELDS:
                 try:
                     validate(query)
                 except UnsafeSQL as error:
@@ -254,4 +258,8 @@ def setup_middleware(mcp):
     mcp.add_tool(Tool.from_function(execute_readonly_sql))
     mcp.add_tool(Tool.from_function(search_database_metadata))
     mcp.add_tool(Tool.from_function(search_rows_by_meaning))
+    mcp.add_tool(Tool.from_function(suggest_comment_sql))
+    mcp.add_tool(Tool.from_function(start_row_labeling))
+    mcp.add_tool(Tool.from_function(get_row_labeling_job))
+    register_job_routes(mcp)
     mcp.add_middleware(PerUserClickHouse())

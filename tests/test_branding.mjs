@@ -42,6 +42,12 @@ test("brands the shell and manifest while preserving upstream application refere
   for (const path of ["/c/new", "/", "/agents"]) assert.equal(pattern.test(path), false, path);
   assert.equal(pattern.test("/c/0b6f2c1e-9f1a-4c7e-bb2d-1a2b3c4d5e6f"), true);
   assert.equal(brandShell({ ...input, index: result.index }).index.split("kai-lock-picker-js").length, 2, "idempotent");
+  const contact = result.index.match(/<script id="kai-hide-contact">([^<]*)<\/script>/);
+  assert.ok(contact, "contact row hider present");
+  const label = new RegExp(contact[1].match(/\/(\^.*?\$)\//)[1]);
+  for (const text of ["Contact:", "Kontak:"]) assert.equal(label.test(text), true, text);
+  for (const text of ["Contact: Tim", "Contacts:", "Model:"]) assert.equal(label.test(text), false, text);
+  assert.equal(brandShell({ ...input, index: result.index }).index.split("kai-hide-contact").length, 2, "idempotent");
   const manifest = JSON.parse(result.manifest);
   assert.equal(manifest.name, "K-AI platform");
   assert.equal(manifest.short_name, "K-AI platform");

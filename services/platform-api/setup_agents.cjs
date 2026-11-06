@@ -17,7 +17,7 @@ function parseArgs(args) {
 const summarize = agent => ({ id: agent.id, name: agent.name, provider: agent.provider, model: agent.model, tools: agent.tools ?? [] });
 function createAdapter({ db, mongoose, permissions, capabilities, configService, api, native, nanoid, brand, beforeWrite }) {
   const { ResourceType, PrincipalType, AccessRoleIds, Constants } = native;
-  const chTools = ['list_databases', 'list_tables', 'run_query', 'get_table_schema', 'execute_readonly_sql', 'search_database_metadata', 'search_rows_by_meaning'].map(name => `${name}${Constants.mcp_delimiter}clickhouse`);
+  const chTools = ['list_databases', 'list_tables', 'run_query', 'get_table_schema', 'execute_readonly_sql', 'search_database_metadata', 'search_rows_by_meaning', 'suggest_comment_sql', 'start_row_labeling', 'get_row_labeling_job'].map(name => `${name}${Constants.mcp_delimiter}clickhouse`);
   const getConfig = actor => configService.getAppConfig({ tenantId: actor.tenantId, failClosed: true, skipRuntimeAugmentation: true });
   const handlers = api.createAdminConfigHandlers({
     ...Object.fromEntries(['listAllConfigs', 'findConfigByPrincipal', 'upsertConfig', 'patchConfigFields', 'tombstoneConfigField', 'unsetConfigField', 'deleteConfig', 'toggleConfigActive'].map(key => [key, db[key]])),
@@ -51,7 +51,8 @@ function createAdapter({ db, mongoose, permissions, capabilities, configService,
       await beforeWrite();
       return db.createAgent({ ...parsed, id: `agent_${nanoid()}`, author: actor.id, ...(actor.tenantId ? { tenantId: actor.tenantId } : {}), mcpServerNames: mcp ? ['clickhouse'] : [] });
     },
-    // Only the managed upgrade fields: tools ([file_search] for General, P2-10; the full CH set, P4-08) or instructions.
+    // Only the managed upgrade fields: tools ([file_search] for General, P2-10; the full CH set), provider+model,
+    // or the presentation/guardrail fields (validated by the native update schema).
     async updateAgent(agent, changes, actor) {
       const keys = Object.keys(changes ?? {});
       // Provider/model move (inference switch, e.g. Gemini on Vertex): both together, plain strings.
@@ -60,9 +61,16 @@ function createAdapter({ db, mongoose, permissions, capabilities, configService,
         await beforeWrite();
         return db.updateAgent({ id: agent.id }, changes, { updatingUserId: actor.id });
       }
-      if (keys.length !== 1 || !['tools', 'instructions'].includes(keys[0])) throw fail();
+      const shown = ['name', 'description', 'instructions', 'conversation_starters', 'support_contact'];
+      if (keys.length && keys.every(key => shown.includes(key))) {
+        if (typeof changes.instructions === 'string' && changes.instructions.length > 8000) throw fail();
+        const parsed = api.agentUpdateSchema.parse(changes);
+        if (JSON.stringify(Object.keys(parsed).sort()) !== JSON.stringify([...keys].sort())) throw fail();
+        await beforeWrite();
+        return db.updateAgent({ id: agent.id }, parsed, { updatingUserId: actor.id });
+      }
+      if (keys.length !== 1 || keys[0] !== 'tools') throw fail();
       if (keys[0] === 'tools' && ![['file_search'], chTools].some(set => JSON.stringify([...changes.tools ?? []].sort()) === JSON.stringify([...set].sort()))) throw fail();
-      if (keys[0] === 'instructions' && (typeof changes.instructions !== 'string' || !changes.instructions || changes.instructions.length > 8000)) throw fail();
       await beforeWrite();
       return db.updateAgent({ id: agent.id }, changes, { updatingUserId: actor.id });
     },

@@ -22,6 +22,9 @@ const HIDE_REVOKE = `<style id="kai-hide-revoke">div:has(> div > #revoke-info-la
 // cannot move to another spec. ponytail: client-side only (polls the SPA path); both managed agents
 // share one provider/model, so a crafted request still stays on that model.
 const LOCK_PICKER = `<style id="kai-lock-picker">[data-testid="model-selector-button"][inert]{opacity:.6;cursor:not-allowed}</style><script id="kai-lock-picker-js">setInterval(function(){var b=document.querySelector('[data-testid="model-selector-button"]');if(b)b.inert=/^\\/c\\/(?!new\\b)[^/]+/.test(location.pathname)},300)</script>`;
+// Agents show "Contact: <owner name>" on the landing page, i.e. the admin who ran setup; kAI is run by a
+// team, so hide that row (the managed agents also carry a team support_contact for other views).
+const HIDE_CONTACT = `<script id="kai-hide-contact">setInterval(function(){document.querySelectorAll('span.shrink-0').forEach(function(s){if(/^(Contact|Kontak):$/.test(s.textContent.trim())&&s.parentElement)s.parentElement.style.display='none'})},300)</script>`;
 // P6-11: LibreChat keeps its rotated file logs 14 days (hard-coded in data-schemas); follow
 // KAI_LOG_RETENTION_DAYS instead (whole days, default 90), read when the api process starts.
 const RETENTION_14D = 'maxFiles: "14d"';
@@ -74,6 +77,7 @@ export function brandShell({ index, manifest, serviceWorker, icons }) {
   );
   if (!index.includes("</head>")) throw new Error("Unexpected head branding seam");
   if (!index.includes(HIDE_REVOKE)) index = index.replace("</head>", HIDE_REVOKE + "</head>");
+  if (!index.includes(HIDE_CONTACT)) index = index.replace("</head>", HIDE_CONTACT + "</head>");
   if (!index.includes(LOCK_PICKER)) index = index.replace("</head>", LOCK_PICKER + "</head>");
   parsed.name = "K-AI platform";
   parsed.short_name = "K-AI platform";

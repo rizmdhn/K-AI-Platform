@@ -60,7 +60,8 @@ def env_checks(env, mode):
     rows.append(("FAIL", "self-registration", "ALLOW_REGISTRATION=true; set false, use make admin-create")
                 if reg == "true" else ("PASS", "self-registration", "disabled"))
     if value(env.get("KAI_AGENT_PROVIDER", "")) != "google" and not value(env.get("OLLAMA_API_KEY", "")):
-        rows.append(("WARN", "chat model key", "OLLAMA_API_KEY empty (or set it later in the Admin Panel)"))
+        rows.append(("WARN", "chat model key", "OLLAMA_API_KEY empty: chat can use a key set in the Admin Panel, "
+                     "but bulk labelling (AF-02) needs it in .env"))
     if value(env.get("KAI_MCP_ENABLED", "false")).lower() == "true" and not value(env.get("CLICKHOUSE_HOST", "")):
         rows.append(("FAIL", "ClickHouse", "KAI_MCP_ENABLED=true but CLICKHOUSE_HOST is empty"))
     try:

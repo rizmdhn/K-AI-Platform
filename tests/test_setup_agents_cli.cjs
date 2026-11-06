@@ -11,7 +11,7 @@ function fixture() {
     permissions: { grantPermission: async data => { calls.push(['grant', data]); return {}; } },
     capabilities: { hasCapability: async () => true },
     configService: { getAppConfig: async options => { assert.equal(options.role, undefined); assert.equal(options.userId, undefined); return state.config; }, invalidateConfigCaches: async () => calls.push(['invalidate']) },
-    api: { agentCreateSchema: { parse: data => { assert.equal(data.author, undefined); assert.equal(data.tenantId, undefined); return data; } }, createAdminConfigHandlers: () => ({ patchConfigField: async (req, res) => { calls.push(['patch', req]); state.config.modelSpecs.list = req.body.entries[0].value; res.status(200).json({}); } }) },
+    api: { agentCreateSchema: { parse: data => { assert.equal(data.author, undefined); assert.equal(data.tenantId, undefined); return data; } }, agentUpdateSchema: { parse: data => Object.fromEntries(Object.entries(data).filter(([k]) => ['name', 'description', 'instructions', 'conversation_starters', 'support_contact'].includes(k))) }, createAdminConfigHandlers: () => ({ patchConfigField: async (req, res) => { calls.push(['patch', req]); state.config.modelSpecs.list = req.body.entries[0].value; res.status(200).json({}); } }) },
     native: { Constants: { mcp_delimiter: '__' }, ResourceType: { AGENT: 'agent', REMOTE_AGENT: 'remote' }, PrincipalType: { USER: 'user', ROLE: 'role' }, AccessRoleIds: { AGENT_OWNER: 'owner', REMOTE_AGENT_OWNER: 'remote-owner', AGENT_VIEWER: 'viewer' } },
     nanoid: () => 'abcdefghijklmnopqrstu', brand: 'Fixture', beforeWrite: async () => calls.push(['write']),
     tenantStorage: { getStore: () => ({}), run: (scope, fn) => fn() },
@@ -47,6 +47,9 @@ test('creation uses schema before native write and rejects tools outside exact w
   await assert.rejects(f.deps.updateAgent({ id: 'x' }, { provider: 'google', model: 'm', tools: [] }, actor));
   await assert.rejects(f.deps.updateAgent({ id: 'x' }, { provider: 'google', model: '' }, actor));
   await assert.rejects(f.deps.updateAgent({ id: 'x' }, { provider: '$where', model: 'm' }, actor));
+  // Presentation fields only, never identity/ownership fields mixed in.
+  await assert.rejects(f.deps.updateAgent({ id: 'x' }, { name: 'n', author: 'someone' }, actor));
+  await assert.rejects(f.deps.updateAgent({ id: 'x' }, { instructions: 'x'.repeat(8001) }, actor));
 });
 test('owner grants are idempotent and viewer grants preserve stronger roles', async () => {
   const f = fixture(), agent = { _id: 'db-id' }, actor = { id: owner._id };

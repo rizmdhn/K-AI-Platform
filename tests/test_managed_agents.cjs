@@ -168,7 +168,7 @@ test("Alice and Bob reuse the same approved agent with their own authorization",
     true,
   );
 });
-test("each of the seven exact approved ClickHouse tool keys can be selected", async () => {
+test("each of the ten exact approved ClickHouse tool keys can be selected", async () => {
   const f = fixture();
   f.state.agent.tools = [
     "list_databases_mcp_clickhouse",
@@ -178,6 +178,9 @@ test("each of the seven exact approved ClickHouse tool keys can be selected", as
     "execute_readonly_sql_mcp_clickhouse",
     "search_database_metadata_mcp_clickhouse",
     "search_rows_by_meaning_mcp_clickhouse",
+    "suggest_comment_sql_mcp_clickhouse",
+    "start_row_labeling_mcp_clickhouse",
+    "get_row_labeling_job_mcp_clickhouse",
   ];
   const c = f.context();
   for (const key of f.state.agent.tools) {
