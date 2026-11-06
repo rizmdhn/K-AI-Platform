@@ -1,0 +1,7 @@
+mcp-clickhouse==0.7.0
+fastmcp==4.0.11
+clickhouse-connect==1.11.0
+sqlglot==30.23.0
+cryptography==50.0.2
+psycopg[binary]==3.3.7
+httpx2==2.14.0

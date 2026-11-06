@@ -1,0 +1,10 @@
+---
+- name: Test deployment inputs without target operations
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Validate only the public deployment inputs
+      ansible.builtin.include_role:
+        name: kai_deploy
+        tasks_from: validate

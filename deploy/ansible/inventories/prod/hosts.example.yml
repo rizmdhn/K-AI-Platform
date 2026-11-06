@@ -1,0 +1,16 @@
+---
+all:
+  children:
+    kai_hosts:
+      hosts:
+        kai-prod:
+          ansible_host: 198.51.100.10
+          ansible_user: ubuntu
+          ansible_port: 22
+          ansible_python_interpreter: /usr/bin/python3
+      vars:
+        # The development deploy role must refuse this inventory for application apply.
+        kai_deploy_environment: production
+        # Replace documentation addresses with approved management networks.
+        kai_admin_cidrs:
+          - 198.51.100.7/32

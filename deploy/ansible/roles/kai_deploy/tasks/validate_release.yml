@@ -1,0 +1,29 @@
+---
+- name: Refuse an interrupted or writable release and an unrelated current path
+  ansible.builtin.assert:
+    that:
+      - >-
+        not kai_deploy_existing.results[0].stat.exists or
+        (kai_deploy_existing.results[0].stat.isdir | default(false) and
+        kai_deploy_existing.results[0].stat.uid | default(-1) == 0 and
+        kai_deploy_existing.results[0].stat.mode | default('') == '0755' and
+        kai_deploy_existing.results[1].stat.isreg | default(false) and
+        kai_deploy_existing.results[1].stat.uid | default(-1) == 0 and
+        kai_deploy_existing.results[1].stat.mode | default('') == '0644')
+      - >-
+        not kai_deploy_existing.results[2].stat.exists or
+        (kai_deploy_existing.results[2].stat.islnk | default(false) and
+        kai_deploy_existing.results[2].stat.uid | default(-1) == 0)
+    fail_msg: Inspect partial/untrusted release state privately; no automatic deletion or adoption occurs.
+
+- name: Read the existing release receipt
+  ansible.builtin.slurp:
+    src: "{{ kai_deploy_release }}/.kai-complete"
+  register: kai_deploy_receipt
+  when: kai_deploy_existing.results[0].stat.exists
+
+- name: Refuse a mismatched release receipt
+  ansible.builtin.assert:
+    that: (kai_deploy_receipt.content | b64decode | trim) == kai_release_sha256
+    fail_msg: Existing release receipt does not match the reviewed digest.
+  when: kai_deploy_existing.results[0].stat.exists

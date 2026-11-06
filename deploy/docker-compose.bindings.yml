@@ -1,0 +1,13 @@
+# Optional host keyring. Never create an empty directory implicitly.
+# Use after MCP overlay; KAI_BINDING_KEY_SOURCE is configured in root .env.
+services:
+  clickhouse-mcp:
+    environment:
+      KAI_BINDING_KEY_DIR: /run/kai-binding-keys
+    volumes:
+      - type: bind
+        source: ${KAI_BINDING_KEY_SOURCE:?Set the absolute host keyring directory in root .env}
+        target: /run/kai-binding-keys
+        read_only: true
+        bind:
+          create_host_path: false

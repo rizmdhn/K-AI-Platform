@@ -1,0 +1,10 @@
+---
+- name: Test Engine floor with fixture facts only
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Validate versions without accessing a daemon
+      ansible.builtin.include_role:
+        name: kai_deploy
+        tasks_from: validate_engine

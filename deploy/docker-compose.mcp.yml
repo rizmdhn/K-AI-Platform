@@ -1,0 +1,91 @@
+# Activated by make when KAI_MCP_ENABLED=true in root .env. Local build; promote an immutable image before production.
+services:
+  api:
+    environment:
+      CLICKHOUSE_MCP_AUTH_TOKEN: ${CLICKHOUSE_MCP_AUTH_TOKEN:-}
+      KAI_PLATFORM_INTERNAL_TOKEN: ${KAI_PLATFORM_INTERNAL_TOKEN:-}
+    networks:
+      - default
+      - tools_private
+    depends_on:
+      clickhouse-mcp:
+        condition: service_healthy
+
+  clickhouse-mcp:
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    build:
+      context: ../services/clickhouse-mcp
+    image: kai-clickhouse-mcp:0.7.0
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp
+    environment:
+      CLICKHOUSE_HOST: ${CLICKHOUSE_HOST:-}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_PORT:-8443}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-kai_unbound}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_MCP_AUTH_TOKEN: ${CLICKHOUSE_MCP_AUTH_TOKEN:-}
+      KAI_PLATFORM_INTERNAL_TOKEN: ${KAI_PLATFORM_INTERNAL_TOKEN:-}
+      KAI_METRICS_TOKEN: ${KAI_METRICS_TOKEN:-}
+      CLICKHOUSE_SECURE: "true"
+      CLICKHOUSE_VERIFY: "true"
+      CLICKHOUSE_ALLOW_WRITE_ACCESS: "false"
+      CLICKHOUSE_ALLOW_DROP: "false"
+      CHDB_ENABLED: "false"
+      CLICKHOUSE_ENABLED: "true"
+      CLICKHOUSE_MCP_SERVER_TRANSPORT: http
+      CLICKHOUSE_MCP_BIND_HOST: 0.0.0.0
+      CLICKHOUSE_MCP_BIND_PORT: "8000"
+      CLICKHOUSE_MCP_ALLOWED_HOSTS: clickhouse-mcp:8000,127.0.0.1:8000,localhost:8000
+      MCP_MIDDLEWARE_MODULE: per_user_middleware
+      KAI_BINDING_MODE: managed
+      KAI_CH_MAX_EXECUTION_TIME: ${KAI_CH_MAX_EXECUTION_TIME:-}
+      KAI_CH_MAX_MEMORY_USAGE: ${KAI_CH_MAX_MEMORY_USAGE:-}
+      KAI_CH_MAX_ROWS_TO_READ: ${KAI_CH_MAX_ROWS_TO_READ:-}
+      KAI_CH_MAX_BYTES_TO_READ: ${KAI_CH_MAX_BYTES_TO_READ:-}
+      KAI_ENROLLMENT_DSN: ${KAI_ENROLLMENT_DSN:-}
+      KAI_BINDING_ACTIVE_KEY_VERSION: ${KAI_BINDING_ACTIVE_KEY_VERSION:-1}
+      KAI_LIBRECHAT_INTERNAL_URL: ${KAI_LIBRECHAT_INTERNAL_URL:-http://api:3080}
+      KAI_BINDING_DSN: ${KAI_BINDING_DSN:-}
+      KAI_BINDING_KEY_DIR: ${KAI_BINDING_KEY_DIR:-/run/kai-binding-keys}
+      KAI_LIBRECHAT_ISSUER: ${KAI_LIBRECHAT_ISSUER:-librechat-local}
+      # Local bge-m3 for search_database_metadata; unreachable (documents profile off) = keyword ranking.
+      KAI_EMBEDDINGS_URL: "${KAI_EMBEDDINGS_BASE_URL:-http://embeddings:8080/v1}/embeddings"
+      # P6-11: audit lines also go to /var/log/kai/audit.jsonl, rotated daily, kept N days.
+      KAI_AUDIT_LOG_DIR: /var/log/kai
+      KAI_LOG_RETENTION_DAYS: ${KAI_LOG_RETENTION_DAYS:-90}
+    volumes:
+      - audit-logs:/var/log/kai
+    networks:
+      - tools_private
+      - tool_egress
+      - embed_private
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 6
+
+  # Only the local embedding server joins MCP here; it never gets tools_private.
+  embeddings:
+    networks:
+      - embed_private
+
+networks:
+  tools_private:
+    internal: true
+  embed_private:
+    internal: true
+  tool_egress:
+
+volumes:
+  audit-logs:

@@ -1,0 +1,14 @@
+{
+	admin off
+	auto_https disable_redirects
+	skip_install_trust
+	servers {
+		protocols h1 h2
+	}
+}
+
+https://{$KAI_DOMAIN}:443 {
+	reverse_proxy api:{$KAI_APP_PORT:3080} {
+		flush_interval -1
+	}
+}

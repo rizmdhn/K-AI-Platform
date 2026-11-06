@@ -1,0 +1,7 @@
+---
+- name: Prove deployment refuses localhost before host mutation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - kai_deploy

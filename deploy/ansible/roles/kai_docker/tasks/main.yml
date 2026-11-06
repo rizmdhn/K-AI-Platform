@@ -1,0 +1,97 @@
+---
+- name: Create apt keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the pinned official Docker apt signing key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    checksum: sha256:1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Configure Docker's stable Ubuntu repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/docker.sources
+    content: |
+      Types: deb
+      URIs: https://download.docker.com/linux/ubuntu
+      Suites: noble
+      Components: stable
+      Architectures: {{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] }}
+      Signed-By: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: '0644'
+  register: kai_docker_repository
+
+- name: Install Docker Engine and the Compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: "{{ kai_docker_repository.changed }}"
+
+- name: Create Docker configuration directory
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Bind implicit published ports to loopback on new Docker bridge networks
+  ansible.builtin.copy:
+    src: daemon.json
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/bin/dockerd --validate --config-file %s
+  register: kai_docker_configuration
+
+- name: Queue any unactivated Docker configuration
+  ansible.builtin.include_tasks: "{{ role_path }}/../../tasks/activation.yml"
+  vars:
+    kai_activation_marker: /etc/kai/docker-applied.sha1
+    kai_activation_checksum: "{{ kai_docker_configuration.checksum }}"
+    kai_activation_event: Activate kAI Docker configuration
+
+- name: Apply Docker configuration before verification
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable Docker Engine
+  ansible.builtin.systemd_service:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Verify Docker Engine availability
+  ansible.builtin.command: docker info --format '{{ '{{' }}.ServerVersion{{ '}}' }}'
+  changed_when: false
+  register: kai_docker_version
+  when: not ansible_check_mode
+
+- name: Inspect Compose plugin version
+  ansible.builtin.command: docker compose version --short
+  changed_when: false
+  register: kai_compose_version
+  when: not ansible_check_mode
+
+- name: Require Compose override-tag support
+  ansible.builtin.assert:
+    that:
+      - (kai_docker_version.stdout | trim) is version('28.0.0', '>=')
+      - (kai_compose_version.stdout | trim | regex_replace('^v', '')) is version('2.24.4', '>=')
+    fail_msg: kAI requires Docker Engine 28.0.0+ and Compose 2.24.4+ for loopback isolation and override tags.
+  when: not ansible_check_mode

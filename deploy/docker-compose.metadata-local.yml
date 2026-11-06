@@ -1,0 +1,43 @@
+# Local development only: persistent metadata uses private Unix sockets, never TCP.
+services:
+  kai-metadata:
+    image: postgres:15@sha256:77cb52de60c9c248e26267a6707db24f8433461ccd60b2c861900dcfe0c5a68e
+    restart: unless-stopped
+    network_mode: none
+    environment:
+      POSTGRES_DB: kai_metadata
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${KAI_METADATA_ADMIN_PASSWORD:?Run scripts/setup_local_metadata.py --apply first}
+      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=scram-sha-256
+    volumes:
+      - kai-metadata-pgdata:/var/lib/postgresql/data
+      - kai-metadata-socket:/var/run/postgresql
+      - ../db:/migrations:ro
+    healthcheck:
+      test: [CMD-SHELL, 'test "$$(cat /proc/1/comm)" = postgres && pg_isready -h /var/run/postgresql -U postgres -d kai_metadata']
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  clickhouse-mcp:
+    environment:
+      KAI_BINDING_KEY_DIR: /run/kai-binding-keys
+    depends_on:
+      kai-metadata:
+        condition: service_healthy
+    volumes:
+      - kai-metadata-socket:/run/kai-metadata:ro
+      - kai-metadata-binding-keys:/run/kai-binding-keys:ro
+
+volumes:
+  kai-metadata-pgdata:
+    name: kai_metadata_pgdata
+  kai-metadata-socket:
+    name: kai_metadata_socket
+  kai-metadata-binding-keys:
+    name: kai_metadata_binding_keys

@@ -1,0 +1,17 @@
+---
+- name: Require a reviewed release artifact and development deployment
+  ansible.builtin.assert:
+    that:
+      - kai_release_archive | default('') is string
+      - kai_release_archive | default('') is match('^/')
+      - kai_release_sha256 | default('') is match('^[a-f0-9]{64}$')
+      - kai_deploy_environment == 'development'
+      - kai_deploy_profiles | type_debug == 'list'
+    fail_msg: Provide an absolute reviewed archive, its SHA256, development environment and a profile list.
+
+- name: Keep unapproved integrations and production publishing disabled
+  ansible.builtin.assert:
+    that:
+      - kai_deploy_profiles | difference(['admin']) | length == 0
+      - kai_deploy_profiles | unique | length == kai_deploy_profiles | length
+    fail_msg: Only the optional admin profile is supported; CH/RAG/production deployment remains deferred.

@@ -1,0 +1,253 @@
+---
+- name: Validate target and inventory before making changes
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Read the actual remote SSH connection
+  ansible.builtin.command: printenv SSH_CONNECTION
+  become: false
+  check_mode: false
+  changed_when: false
+  register: kai_ssh_connection
+
+- name: Require a real remote SSH connection
+  ansible.builtin.assert:
+    that:
+      - kai_ssh_connection.stdout.split() | length == 4
+    fail_msg: Provision over SSH; local and container connection plugins are unsupported.
+
+- name: Verify that the current management source remains allowed
+  ansible.builtin.set_fact:
+    kai_validated_admin_cidrs: >-
+      {{ kai_admin_cidrs | kai_admin_networks(kai_ssh_connection.stdout.split()[0]) }}
+
+- name: Inspect installed packages
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: Inspect ownership of the host configuration
+  ansible.builtin.stat:
+    path: /etc/kai/managed-host.json
+  register: kai_host_marker
+
+- name: Inspect pre-existing Docker configuration
+  ansible.builtin.stat:
+    path: /etc/docker/daemon.json
+  register: kai_existing_docker_config
+
+- name: Inspect an existing application account
+  ansible.builtin.getent:
+    database: passwd
+    key: kai
+    fail_key: false
+
+- name: Inspect an existing container daemon socket
+  ansible.builtin.stat:
+    path: /var/run/docker.sock
+  register: kai_existing_docker_socket
+
+- name: Refuse to adopt an existing application account on an unmanaged host
+  ansible.builtin.assert:
+    that:
+      - kai_host_marker.stat.exists or ansible_facts.getent_passwd.get('kai') is none
+    fail_msg: The kai account already exists; review its ownership before provisioning.
+
+- name: Refuse to adopt an existing container host or conflicting Docker packages
+  ansible.builtin.assert:
+    that:
+      - kai_host_marker.stat.exists or 'docker-ce' not in ansible_facts.packages
+      - kai_host_marker.stat.exists or not kai_existing_docker_config.stat.exists
+      - kai_host_marker.stat.exists or not kai_existing_docker_socket.stat.exists
+      - >-
+        ['docker.io', 'docker-compose', 'docker-compose-v2', 'docker-doc',
+         'docker-buildx', 'podman-docker', 'containerd', 'runc'] |
+        intersect(ansible_facts.packages.keys() | list) | length == 0
+    fail_msg: Fresh hosts only; review existing Docker/runtime installations instead of removing them automatically.
+
+- name: Read existing host management policy
+  ansible.builtin.slurp:
+    src: /etc/kai/managed-host.json
+  register: kai_old_host_policy
+  when: kai_host_marker.stat.exists
+
+- name: Refuse an implicit firewall allowlist or SSH port migration
+  ansible.builtin.assert:
+    that:
+      - (kai_old_host_policy.content | b64decode | from_json).admin_cidrs | sort == kai_validated_admin_cidrs | sort
+      - (kai_old_host_policy.content | b64decode | from_json).ssh_port | int == ansible_port | default(22) | int
+    fail_msg: Management CIDR or SSH port changes require a reviewed firewall migration.
+  when: kai_host_marker.stat.exists
+
+- name: Inspect existing UFW rules before claiming a new host
+  ansible.builtin.command: ufw show added
+  environment:
+    LC_ALL: C
+  changed_when: false
+  check_mode: false
+  register: kai_ufw_existing_rules
+  when:
+    - not kai_host_marker.stat.exists
+    - "'ufw' in ansible_facts.packages"
+
+- name: Refuse to inherit unmanaged UFW rules
+  ansible.builtin.assert:
+    that:
+      - kai_ufw_existing_rules.stdout is not search('(?m)^ufw\\s')
+    fail_msg: Existing UFW rules require operator review before this fresh-host playbook is used.
+  when:
+    - not kai_host_marker.stat.exists
+    - "'ufw' in ansible_facts.packages"
+
+- name: Create the root-owned management configuration directory
+  ansible.builtin.file:
+    path: /etc/kai
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Record ownership and management policy for safe retries
+  ansible.builtin.copy:
+    dest: /etc/kai/managed-host.json
+    content: "{{ {'admin_cidrs': kai_validated_admin_cidrs, 'ssh_port': ansible_port | default(22) | int} | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install host prerequisites and apply available OS updates
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - openssh-server
+      - python3-apt
+      - systemd-timesyncd
+      - ufw
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    upgrade: safe
+
+- name: Create the unprivileged application group
+  ansible.builtin.group:
+    name: kai
+    system: true
+
+- name: Create the unprivileged application account
+  ansible.builtin.user:
+    name: kai
+    group: kai
+    groups: ''
+    append: false
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    password_lock: true
+
+- name: Create the application directory without installing application code
+  ansible.builtin.file:
+    path: /opt/kai
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Ensure SSH is available before validating its configuration
+  ansible.builtin.systemd_service:
+    name: ssh
+    enabled: true
+    state: started
+
+- name: Install key-only SSH configuration while preserving existing authorized keys
+  ansible.builtin.copy:
+    src: 00-kai.conf
+    dest: /etc/ssh/sshd_config.d/00-kai.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/sbin/sshd -t -f %s
+  register: kai_ssh_configuration
+
+- name: Validate the complete SSH configuration
+  ansible.builtin.command: /usr/sbin/sshd -t
+  changed_when: false
+  check_mode: false
+
+- name: Inspect effective SSH authentication settings
+  ansible.builtin.command: /usr/sbin/sshd -T
+  changed_when: false
+  check_mode: false
+  register: kai_effective_sshd
+  when: not ansible_check_mode
+
+- name: Reject conflicting SSH authentication configuration
+  ansible.builtin.assert:
+    that:
+      - "'passwordauthentication no' in kai_effective_sshd.stdout_lines"
+      - "'kbdinteractiveauthentication no' in kai_effective_sshd.stdout_lines"
+      - "'pubkeyauthentication yes' in kai_effective_sshd.stdout_lines"
+      - >-
+        'permitrootlogin prohibit-password' in kai_effective_sshd.stdout_lines or
+        'permitrootlogin without-password' in kai_effective_sshd.stdout_lines
+    fail_msg: Existing SSH directives conflict with key-only authentication; review before reloading.
+  when: not ansible_check_mode
+
+- name: Queue any unactivated SSH configuration
+  ansible.builtin.include_tasks: "{{ role_path }}/../../tasks/activation.yml"
+  vars:
+    kai_activation_marker: /etc/kai/ssh-applied.sha1
+    kai_activation_checksum: "{{ kai_ssh_configuration.checksum }}"
+    kai_activation_event: Activate kAI SSH configuration
+
+- name: Reload SSH before firewall changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure time synchronization is enabled
+  ansible.builtin.systemd_service:
+    name: systemd-timesyncd
+    enabled: true
+    state: started
+
+- name: Ensure UFW manages IPv6 as well as IPv4
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    regexp: '^IPV6='
+    line: IPV6=yes
+
+- name: Allow management SSH before enabling the firewall
+  community.general.ufw:
+    rule: allow
+    proto: tcp
+    from_ip: "{{ item }}"
+    port: "{{ ansible_port | default(22) }}"
+    comment: kAI management SSH
+  loop: "{{ kai_validated_admin_cidrs }}"
+
+- name: Allow HTTPS on the host
+  community.general.ufw:
+    rule: allow
+    proto: tcp
+    port: '443'
+    comment: kAI HTTPS
+
+- name: Deny other incoming host traffic
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Allow outgoing host traffic
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Enable the host firewall
+  community.general.ufw:
+    state: enabled
+
+- name: Detect a required reboot without rebooting automatically
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: kai_reboot_required
+
+- name: Report a required maintenance reboot
+  ansible.builtin.debug:
+    msg: OS updates require a reboot; schedule it and verify SSH, time synchronization and Docker afterward.
+  when: kai_reboot_required.stat.exists

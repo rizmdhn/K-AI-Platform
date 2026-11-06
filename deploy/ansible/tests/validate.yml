@@ -1,0 +1,10 @@
+---
+- name: Test inventory validation without touching host configuration
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Run only the input-validation portion of the host role
+      ansible.builtin.include_role:
+        name: kai_host
+        tasks_from: validate

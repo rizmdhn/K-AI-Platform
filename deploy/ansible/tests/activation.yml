@@ -1,0 +1,27 @@
+---
+- name: Exercise durable activation without changing a system service
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    kai_activation_marker: "{{ probe_dir }}/applied"
+    kai_activation_checksum: candidate
+    kai_activation_event: Activate test configuration
+  tasks:
+    - name: Queue activation through the production decision tasks
+      ansible.builtin.include_tasks: ../tasks/activation.yml
+    - name: Apply queued activation
+      ansible.builtin.meta: flush_handlers
+  handlers:
+    - name: Simulate the external service loading its configuration
+      ansible.builtin.copy:
+        dest: "{{ probe_dir }}/loaded"
+        content: candidate
+        mode: '0600'
+      listen: Activate test configuration
+    - name: Record successful test activation
+      ansible.builtin.copy:
+        dest: "{{ probe_dir }}/applied"
+        content: candidate
+        mode: '0600'
+      listen: Activate test configuration

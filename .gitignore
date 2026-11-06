@@ -1,0 +1,23 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+*.env
+!.env.example
+.kai-env-*
+deploy/runtime/
+runtime/
+secrets/
+backups/
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+
+# Project documents live in ../Docs; GSD notes stay local.
+.planning/
+docs/
+Docs/

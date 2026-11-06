@@ -1,0 +1,2 @@
+psycopg[binary]==3.3.7
+clickhouse-connect==1.11.0

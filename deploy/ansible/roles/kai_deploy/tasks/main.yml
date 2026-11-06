@@ -1,0 +1,267 @@
+---
+- name: Refuse local and container deployment targets
+  ansible.builtin.assert:
+    that:
+      - ansible_connection | default('ssh') == 'ssh'
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_version == '24.04'
+      - ansible_facts.service_mgr == 'systemd'
+    fail_msg: Deploy only over SSH to a provisioned Ubuntu 24.04 systemd VM, never localhost or a container.
+
+- name: Validate deployment inputs
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Require an actual SSH session
+  ansible.builtin.command: printenv SSH_CONNECTION
+  become: false
+  changed_when: false
+  check_mode: false
+  register: kai_deploy_ssh
+
+- name: Require the SSH session boundary
+  ansible.builtin.assert:
+    that: kai_deploy_ssh.stdout.split() | length == 4
+    fail_msg: No actual SSH connection was established.
+
+- name: Inspect host ownership and pre-provisioned private runtime
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /etc/kai/managed-host.json
+    - /opt/kai
+    - /opt/kai/runtime
+    - /opt/kai/runtime/.env
+  register: kai_deploy_preflight
+  no_log: true
+
+- name: Refuse unmanaged host, writable release parent or unsafe runtime secrets
+  ansible.builtin.assert:
+    that:
+      - kai_deploy_preflight.results[0].stat.isreg | default(false)
+      - kai_deploy_preflight.results[0].stat.uid | default(-1) == 0
+      - kai_deploy_preflight.results[1].stat.isdir | default(false)
+      - kai_deploy_preflight.results[1].stat.uid | default(-1) == 0
+      - kai_deploy_preflight.results[1].stat.mode | default('') == '0755'
+      - kai_deploy_preflight.results[2].stat.isdir | default(false)
+      - kai_deploy_preflight.results[2].stat.uid | default(-1) == 0
+      - kai_deploy_preflight.results[2].stat.mode | default('') == '0700'
+      - kai_deploy_preflight.results[3].stat.isreg | default(false)
+      - kai_deploy_preflight.results[3].stat.uid | default(-1) == 0
+      - kai_deploy_preflight.results[3].stat.mode | default('') == '0600'
+    fail_msg: Provision the host and its separate root-owned private runtime first; deployment never creates or replaces secrets.
+
+- name: Verify the allowlisted release archive on the controller
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ playbook_dir }}/../../scripts/package_release.py"
+      - --verify
+      - "{{ kai_release_archive }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  check_mode: false
+  register: kai_deploy_verified
+
+- name: Require the reviewed artifact digest
+  ansible.builtin.assert:
+    that: (kai_deploy_verified.stdout | from_json).sha256 == kai_release_sha256
+    fail_msg: The release archive does not match the reviewed digest.
+
+- name: Inspect Compose override support
+  ansible.builtin.command: docker compose version --short
+  changed_when: false
+  check_mode: false
+  register: kai_deploy_compose_version
+
+- name: Inspect the target host Engine rather than a Docker context
+  ansible.builtin.command:
+    argv:
+      - docker
+      - --host
+      - unix:///var/run/docker.sock
+      - info
+      - --format
+      - "{{ '{{' }}.ServerVersion{{ '}}' }}"
+  changed_when: false
+  check_mode: false
+  register: kai_deploy_engine_version
+
+- name: Recheck Engine and Compose even on an already marked host
+  ansible.builtin.import_tasks: validate_engine.yml
+
+- name: Require the documented development HTTP port before changing containers
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - |
+        from pathlib import Path
+        lines=Path('/opt/kai/runtime/.env').read_text().splitlines()
+        ports=[line.split('=',1)[1].strip().strip('"\'') for line in lines if line.startswith('PORT=')]
+        assert ports==['3080'], 'Set the documented development port before deployment'
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Inspect existing artifact directory ownership
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /opt/kai/artifacts
+    - /opt/kai/releases
+  register: kai_deploy_parents
+
+- name: Refuse symlinked or writable artifact parents
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isdir | default(false) and item.stat.uid | default(-1) == 0 and item.stat.mode | default('') == '0755')
+    fail_msg: Existing artifact parents must be root-owned non-symlink directories.
+  loop: "{{ kai_deploy_parents.results }}"
+
+- name: Choose the immutable release directory
+  ansible.builtin.set_fact:
+    kai_deploy_release: "/opt/kai/releases/{{ kai_release_sha256 }}"
+
+- name: Inspect the release and completion marker
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - "{{ kai_deploy_release }}"
+    - "{{ kai_deploy_release }}/.kai-complete"
+    - /opt/kai/current
+  register: kai_deploy_existing
+
+- name: Validate any existing release before reuse
+  ansible.builtin.import_tasks: validate_release.yml
+
+- name: Apply the release only outside check mode
+  when: not ansible_check_mode
+  block:
+    - name: Prepare root-owned artifact directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - /opt/kai/artifacts
+        - /opt/kai/releases
+        - "{{ kai_deploy_release }}"
+
+    - name: Copy the public source artifact only
+      ansible.builtin.copy:
+        src: "{{ kai_release_archive }}"
+        dest: "/opt/kai/artifacts/{{ kai_release_sha256 }}.tar.gz"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Verify the transferred archive
+      ansible.builtin.stat:
+        path: "/opt/kai/artifacts/{{ kai_release_sha256 }}.tar.gz"
+        checksum_algorithm: sha256
+      register: kai_deploy_copied
+
+    - name: Refuse a transfer digest mismatch
+      ansible.builtin.assert:
+        that: kai_deploy_copied.stat.checksum | default('') == kai_release_sha256
+
+    - name: Extract a new immutable release
+      ansible.builtin.unarchive:
+        src: "/opt/kai/artifacts/{{ kai_release_sha256 }}.tar.gz"
+        dest: "{{ kai_deploy_release }}"
+        remote_src: true
+        owner: root
+        group: root
+      when: not kai_deploy_existing.results[0].stat.exists
+
+    - name: Link the preserved private runtime into the release
+      ansible.builtin.file:
+        src: /opt/kai/runtime
+        dest: "{{ kai_deploy_release }}/deploy/runtime"
+        state: link
+        owner: root
+        group: root
+        force: false
+
+    - name: Link root environment to the preserved private runtime
+      ansible.builtin.file:
+        src: /opt/kai/runtime/.env
+        dest: "{{ kai_deploy_release }}/.env"
+        state: link
+        owner: root
+        group: root
+        force: false
+
+    - name: Record completed source installation
+      ansible.builtin.copy:
+        content: "{{ kai_release_sha256 }}\n"
+        dest: "{{ kai_deploy_release }}/.kai-complete"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Build fixed core-chat Compose arguments
+      ansible.builtin.set_fact:
+        kai_deploy_compose: >-
+          {{ ['docker', '--host', 'unix:///var/run/docker.sock', 'compose', '--project-name', 'kai', '--project-directory', kai_deploy_release + '/deploy',
+          '--env-file', '/opt/kai/runtime/.env', '-f', kai_deploy_release + '/deploy/upstream/docker-compose.yml',
+          '-f', kai_deploy_release + '/deploy/docker-compose.override.yml'] +
+          (['--profile', 'admin'] if 'admin' in kai_deploy_profiles else []) }}
+
+    - name: Validate effective configuration without printing secrets
+      ansible.builtin.command:
+        argv: "{{ kai_deploy_compose + ['config', '--quiet'] }}"
+      changed_when: false
+      no_log: true
+
+    - name: Build and reconcile the development stack with health waiting
+      ansible.builtin.command:
+        argv: "{{ kai_deploy_compose + ['up', '-d', '--build', '--wait', '--wait-timeout', '180'] }}"
+      no_log: true
+
+    - name: Apply the native managed USER baseline
+      ansible.builtin.command:
+        argv: "{{ kai_deploy_compose + ['exec', '-T', 'api', 'node', 'config/kai-managed-chat.cjs'] }}"
+      no_log: true
+
+    - name: Restart API to clear permission caches
+      ansible.builtin.command:
+        argv: "{{ kai_deploy_compose + ['restart', 'api'] }}"
+      no_log: true
+
+    - name: Wait for the restarted API
+      ansible.builtin.command:
+        argv: "{{ kai_deploy_compose + ['up', '-d', '--no-deps', '--wait', '--wait-timeout', '180', 'api'] }}"
+      no_log: true
+
+    - name: Verify core HTTP health and login without provider calls
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:3080{{ item }}"
+        status_code: 200
+        use_proxy: false
+        follow_redirects: none
+      loop:
+        - /health
+        - /login
+
+    - name: Verify native authentication denies anonymous model access
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3080/api/models
+        status_code: 401
+        use_proxy: false
+        follow_redirects: none
+
+    - name: Publish the successful release pointer
+      ansible.builtin.file:
+        src: "{{ kai_deploy_release }}"
+        dest: /opt/kai/current
+        state: link
+        owner: root
+        group: root
+        force: true

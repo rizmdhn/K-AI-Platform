@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/LibreChat-AI/LibreChat",
+  "tag": "v0.8.8",
+  "commit": "e8f3be08623663d4ad7f7241e693c94469b63bb0",
+  "upstream_prerelease": true,
+  "selected_on": "2026-11-02",
+  "status": "Development candidate; D07 production approval pending",
+  "files": {
+    "docker-compose.yml": "b8a4c27a1ec3880c44be4eb6b37b85771e3206a35f6d0b34ae597885057e0660",
+    "LICENSE": "1ce5c9d51e5ab764b44142cd44d1e687f5bfe32f807c7221c14d061007309b97"
+  }
+}

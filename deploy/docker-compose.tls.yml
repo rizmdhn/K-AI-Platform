@@ -1,0 +1,48 @@
+# Apply after the upstream and development override files. Requires a bare hostname.
+services:
+  api:
+    ports: !override []
+    environment:
+      DOMAIN_CLIENT: https://${KAI_DOMAIN:?set_KAI_DOMAIN_to_the_approved_hostname}
+      DOMAIN_SERVER: https://${KAI_DOMAIN:?set_KAI_DOMAIN_to_the_approved_hostname}
+      SESSION_COOKIE_SECURE: "true"
+      TRUST_PROXY: "1"
+      # The development signup policy must not become public before D01 is resolved.
+      ALLOW_REGISTRATION: "false"
+      ALLOW_SOCIAL_REGISTRATION: "false"
+    networks:
+      - default
+      - web
+
+  reverse-proxy:
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    image: caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:443:443/tcp"
+    environment:
+      KAI_DOMAIN: ${KAI_DOMAIN:?set_KAI_DOMAIN_to_the_approved_hostname}
+      KAI_APP_PORT: ${PORT:-3080}
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - web
+
+  admin-panel:
+    ports: !override []
+
+networks:
+  web:
+
+volumes:
+  caddy_data:
+  caddy_config:

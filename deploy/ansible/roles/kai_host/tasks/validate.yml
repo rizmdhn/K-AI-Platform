@@ -1,0 +1,16 @@
+---
+- name: Require the supported Ubuntu release and architecture
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_version == '24.04'
+      - ansible_facts.architecture in ['x86_64', 'aarch64']
+      - ansible_facts.service_mgr == 'systemd'
+      - (ansible_port | default(22) | int) >= 1
+      - (ansible_port | default(22) | int) <= 65535
+      - (ansible_port | default(22) | int) != 443
+    fail_msg: This playbook requires Ubuntu 24.04 LTS, systemd, amd64/arm64 and a valid SSH port distinct from public HTTPS port 443.
+
+- name: Validate the explicit SSH management allowlist
+  ansible.builtin.set_fact:
+    kai_validated_admin_cidrs: "{{ kai_admin_cidrs | kai_admin_networks }}"

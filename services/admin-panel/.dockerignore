@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!apply.mjs
+!overlays/
+!overlays/*.tsx
+!overlays/*.ts

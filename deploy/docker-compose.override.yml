@@ -1,0 +1,239 @@
+# Local development only. Production authentication/TLS and S0 security gates remain open.
+x-kai-logging: &kai-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  api:
+    logging: *kai-logging
+    container_name: !reset null
+    build:
+      context: ../services/platform-api
+      additional_contexts:
+        kai_branding: ./branding
+    image: kai-librechat:0.2.0
+    ports: !override
+      - "127.0.0.1:${PORT:-3080}:${PORT:-3080}"
+    depends_on: !override
+      mongodb:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
+    # Read the single root .env through explicit interpolation; do not forward other services' secrets.
+    environment:
+      PORT: ${PORT:-3080}
+      DOMAIN_CLIENT: ${DOMAIN_CLIENT:-http://localhost:3080}
+      DOMAIN_SERVER: ${DOMAIN_SERVER:-http://localhost:3080}
+      APP_TITLE: ${APP_TITLE:-K-AI platform}
+      CUSTOM_FOOTER: ${CUSTOM_FOOTER:-K-AI platform}
+      ENDPOINTS: ${ENDPOINTS:-custom,agents}
+      ALLOW_EMAIL_LOGIN: ${ALLOW_EMAIL_LOGIN:-true}
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-false}
+      ALLOW_SOCIAL_LOGIN: ${ALLOW_SOCIAL_LOGIN:-false}
+      ALLOW_SOCIAL_REGISTRATION: ${ALLOW_SOCIAL_REGISTRATION:-false}
+      ALLOW_PASSWORD_RESET: ${ALLOW_PASSWORD_RESET:-false}
+      ALLOW_UNVERIFIED_EMAIL_LOGIN: ${ALLOW_UNVERIFIED_EMAIL_LOGIN:-true}
+      ALLOW_SHARED_LINKS: ${ALLOW_SHARED_LINKS:-false}
+      ALLOW_SHARED_LINKS_PUBLIC: ${ALLOW_SHARED_LINKS_PUBLIC:-false}
+      CREDS_KEY: ${CREDS_KEY:-}
+      CREDS_IV: ${CREDS_IV:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      ADMIN_PANEL_URL: ${ADMIN_PANEL_URL:-http://localhost:3081}
+      DEBUG_LOGGING: ${DEBUG_LOGGING:-false}
+      DEBUG_CONSOLE: ${DEBUG_CONSOLE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      CONFIG_PATH: /app/librechat.yaml
+      # Inter-service addresses (P1-14): defaults are compose service names; point them at another
+      # server when the stack is split. The MCP address stays the hostname clickhouse-mcp (librechat.yaml
+      # allowlist + platform code); on a split deploy map it with extra_hosts.
+      MONGO_URI: ${KAI_MONGO_URI:-mongodb://mongodb:27017/LibreChat}
+      MEILI_HOST: ${KAI_MEILI_HOST:-http://meilisearch:7700}
+      # Empty = no RAG service (documents profile off). Set to http://rag_api:8000 with `make documents-up`.
+      RAG_API_URL: ${KAI_RAG_API_URL:-}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      # Inference used by the managed agents (make agents-setup moves existing agents in place). Empty = keep
+      # the current provider/model (Ollama Cloud). Gemini on Vertex: google + model IDs + deploy/docker-compose.vertex.yml.
+      KAI_AGENT_PROVIDER: ${KAI_AGENT_PROVIDER:-}
+      KAI_GENERAL_AGENT_MODEL: ${KAI_GENERAL_AGENT_MODEL:-}
+      KAI_CH_AGENT_MODEL: ${KAI_CH_AGENT_MODEL:-}
+      SCHEDULES_DISABLED: "true"
+      # P6-11: rotated LibreChat file logs (logs volume) are kept this many days (patched from upstream 14).
+      KAI_LOG_RETENTION_DAYS: ${KAI_LOG_RETENTION_DAYS:-90}
+      # Uploaded documents go to RustFS (librechat.yaml fileStrategies.document); downloads stream through api.
+      AWS_ENDPOINT_URL: ${KAI_S3_ENDPOINT:-http://rustfs:9000}
+      AWS_FORCE_PATH_STYLE: "true"
+      AWS_REGION: us-east-1
+      AWS_BUCKET_NAME: ${KAI_S3_BUCKET:-kai-files}
+      # Bucket-scoped RustFS user created by rustfs-init; the root credential is not given to api.
+      AWS_ACCESS_KEY_ID: ${KAI_S3_APP_ACCESS_KEY:-}
+      AWS_SECRET_ACCESS_KEY: ${KAI_S3_APP_SECRET_KEY:-}
+    # Only api bridges the default network (MongoDB without auth, Meilisearch) and documents_private.
+    networks: [default, documents_private]
+    volumes: !override
+      - ./librechat.yaml:/app/librechat.yaml:ro
+      - ../scripts/configure_managed_chat.cjs:/app/config/kai-managed-chat.cjs:ro
+      - uploads:/app/uploads
+      - logs:/app/logs
+      - skills:/app/skill
+      - librechat-data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:' + process.env.PORT + '/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 12
+
+  mongodb:
+    logging: *kai-logging
+    container_name: !reset null
+    image: mongo:8.0.20@sha256:098862b1339f031900ca66cf8fef799e616d6324fa41b9a263f2ec899552c1ef
+    user: !reset null
+    volumes: !override
+      - mongodb:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand({ping: 1}).ok ? 0 : 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  meilisearch:
+    logging: *kai-logging
+    container_name: !reset null
+    image: getmeili/meilisearch:v1.35.1@sha256:8b57fc3c7f46535ddef3828df1538465ac19d892eb57c9a10da6df0880bd5856
+    # The upstream host UID cannot initialize this image's root-owned named volume.
+    user: !reset null
+    volumes: !override
+      - meilisearch:/meili_data
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # S3-compatible object storage for uploaded documents (D10/P6-12). Internal only: no published port,
+  # web console off, anonymous access refused. Empty credentials make the image refuse to start.
+  rustfs:
+    logging: *kai-logging
+    image: &rustfs-image rustfs/rustfs:1.0.4@sha256:ed9210d6411d77ffceb70d94b964a3cb7d225983368bc25bebe01e995293dcc2
+    environment: &rustfs-env
+      RUSTFS_ACCESS_KEY: ${KAI_S3_ACCESS_KEY:-}
+      RUSTFS_SECRET_KEY: ${KAI_S3_SECRET_KEY:-}
+      RUSTFS_CONSOLE_ENABLE: "false"
+    volumes:
+      - rustfs-data:/data
+    networks: [documents_private]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # One-shot, idempotent: bucket + bucket-scoped app user (deploy/rustfs-init.sh, curl SigV4, same image).
+  rustfs-init:
+    logging: *kai-logging
+    image: *rustfs-image
+    environment:
+      <<: *rustfs-env
+      BUCKET: ${KAI_S3_BUCKET:-kai-files}
+      APP_ACCESS_KEY: ${KAI_S3_APP_ACCESS_KEY:-}
+      APP_SECRET_KEY: ${KAI_S3_APP_SECRET_KEY:-}
+    volumes:
+      - ./rustfs-init.sh:/kai/rustfs-init.sh:ro
+    networks: [documents_private]
+    entrypoint: ["sh", "/kai/rustfs-init.sh"]
+    restart: "no"
+    depends_on:
+      rustfs:
+        condition: service_healthy
+
+  # Preserve upstream definitions but do not start these until their integration gates pass.
+  vectordb:
+    logging: *kai-logging
+    profiles: [documents]
+    container_name: !reset null
+    image: pgvector/pgvector:0.8.0-pg15-trixie@sha256:8809cfffff0082cf260c9ac752f1dd1afc77f6f0a55c4e6411321e78efc3d9a5
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?run_make_setup}
+      POSTGRES_USER: ${POSTGRES_USER:?run_make_setup}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run_make_setup}
+    networks: [documents_private]
+
+  rag_api:
+    logging: *kai-logging
+    profiles: [documents]
+    container_name: !reset null
+    image: registry.librechat.ai/librechat-ai/librechat-rag-api-dev-lite@sha256:a62ce2221b43a9bb57fa6cb733e7047c80132960272c33d5704028f3071a1251
+    env_file: !reset []
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kai_rag}
+      POSTGRES_USER: ${POSTGRES_USER:-kai_rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      DB_HOST: ${KAI_VECTORDB_HOST:-vectordb}
+      JWT_SECRET: ${JWT_SECRET:-} # same secret api signs RAG tokens with; api cannot start without it
+      # Self-hosted embeddings only: Ollama Cloud has no embedding models and client data stays local (D09: bge-m3).
+      # The local llama.cpp server speaks the OpenAI embeddings API; nothing leaves the compose network.
+      EMBEDDINGS_PROVIDER: openai
+      RAG_OPENAI_BASEURL: ${KAI_EMBEDDINGS_BASE_URL:-http://embeddings:8080/v1}
+      RAG_OPENAI_API_KEY: local-no-key
+      RAG_CHECK_EMBEDDING_CTX_LENGTH: "false" # send text, not OpenAI tiktoken ids
+      EMBEDDINGS_MODEL: bge-m3
+      CHUNK_SIZE: ${KAI_RAG_CHUNK_SIZE:-1500}
+      CHUNK_OVERLAP: ${KAI_RAG_CHUNK_OVERLAP:-100}
+    networks: [documents_private]
+
+  # CPU embedding server for rag_api (~300 MB image; Docker on Apple Silicon has no GPU anyway).
+  # First start downloads the GGUF model (~635 MB) from Hugging Face into the volume; no published port.
+  embeddings:
+    logging: *kai-logging
+    profiles: [documents]
+    image: ghcr.io/ggml-org/llama.cpp:server@sha256:c0a11067c72bb1eb330b8bddbf9869274c195e596bf4fae55fd527102e644b85
+    command: [--host, 0.0.0.0, --port, "8080", --embeddings, --pooling, cls, --alias, bge-m3,
+              -c, "8192", -b, "8192", -ub, "8192",
+              --hf-repo, "${KAI_EMBEDDINGS_HF_REPO:-gpustack/bge-m3-GGUF}", --hf-file, "${KAI_EMBEDDINGS_HF_FILE:-bge-m3-Q8_0.gguf}"]
+    environment:
+      LLAMA_CACHE: /models
+    volumes:
+      - embedding-models:/models
+    # embed_egress only downloads the model from Hugging Face; it reaches no other service.
+    networks: [documents_private, embed_egress]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      retries: 60
+
+  admin-panel:
+    logging: *kai-logging
+    profiles: [admin]
+    container_name: !reset null
+    build:
+      context: ../services/admin-panel
+      additional_contexts:
+        kai_branding: ./branding
+    image: kai-admin-panel:0.1.0
+    environment:
+      API_SERVER_URL: ${KAI_LIBRECHAT_INTERNAL_URL:-http://api:${PORT:-3080}}
+    ports: !override
+      - "127.0.0.1:3081:3000"
+
+networks:
+  # Third-party document services (rag_api, vectordb, embeddings, rustfs) never share a network with MongoDB.
+  documents_private:
+    internal: true
+  embed_egress:
+
+volumes:
+  mongodb:
+  meilisearch:
+  uploads:
+  embedding-models:
+  rustfs-data:
+  logs:
+  skills:
+

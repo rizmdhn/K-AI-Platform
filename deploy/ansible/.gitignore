@@ -1,0 +1,6 @@
+.venv/
+.collections/
+.cache/
+__pycache__/
+inventories/*/hosts.yml
+

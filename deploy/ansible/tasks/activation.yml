@@ -1,0 +1,24 @@
+---
+# Persisted activation receipts make retries safe after a config copy outlives its handler queue.
+- name: Check whether the managed configuration needs service activation
+  when: not ansible_check_mode
+  block:
+    - name: Inspect the last successful activation receipt
+      ansible.builtin.stat:
+        path: "{{ kai_activation_marker }}"
+      register: kai_activation_status
+
+    - name: Read the last successful activation receipt
+      ansible.builtin.slurp:
+        src: "{{ kai_activation_marker }}"
+      register: kai_activation_record
+      when: kai_activation_status.stat.exists
+
+    - name: Queue activation for new or interrupted configuration changes
+      ansible.builtin.debug:
+        msg: Managed configuration requires service activation.
+      changed_when: true
+      when: >-
+        not kai_activation_status.stat.exists or
+        (kai_activation_record.content | b64decode | trim) != kai_activation_checksum
+      notify: "{{ kai_activation_event }}"

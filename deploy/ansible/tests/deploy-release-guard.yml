@@ -1,0 +1,10 @@
+---
+- name: Test release reuse guards using fixture facts only
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Check release ownership and read its fixture receipt
+      ansible.builtin.include_role:
+        name: kai_deploy
+        tasks_from: validate_release

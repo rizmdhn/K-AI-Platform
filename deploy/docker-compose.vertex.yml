@@ -1,0 +1,13 @@
+# Gemini on Vertex AI (owner decision 6 Nov 2026). Added by bootstrap.py --mcp-overlay only when
+# KAI_VERTEX_KEY_FILE is set. The service account JSON is mounted read-only, never baked into an image;
+# GOOGLE_KEY stays empty so LibreChat uses the service account (Vertex), not an AI Studio API key.
+services:
+  api:
+    environment:
+      ENDPOINTS: custom,agents,google
+      GOOGLE_KEY: ""
+      GOOGLE_SERVICE_KEY_FILE: /run/kai/vertex-service-account.json
+      GOOGLE_LOC: ${KAI_VERTEX_LOCATION:?set KAI_VERTEX_LOCATION (Vertex region, e.g. asia-southeast2 or global)}
+      GOOGLE_MODELS: ${KAI_GENERAL_AGENT_MODEL:?set KAI_GENERAL_AGENT_MODEL},${KAI_CH_AGENT_MODEL:-}
+    volumes:
+      - ${KAI_VERTEX_KEY_FILE}:/run/kai/vertex-service-account.json:ro
