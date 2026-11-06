@@ -4,7 +4,7 @@ $(error Konfigurasi overlay ditolak; periksa .env secara privat sebelum melanjut
 endif
 COMPOSE = docker compose --project-name kai --project-directory deploy --env-file .env -f deploy/upstream/docker-compose.yml -f deploy/docker-compose.override.yml $(MCP_OVERLAY)
 
-.PHONY: setup preflight check up down logs ps test mcp-test admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup warehouse-local-check warehouse-local-setup evals smoke-config worker-test schema-test rag-acl-test
+.PHONY: setup preflight check up down logs ps test mcp-test mcp-image admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup warehouse-local-check warehouse-local-setup evals smoke-config worker-test schema-test rag-acl-test
 
 setup:
 	python3 scripts/bootstrap.py
@@ -72,10 +72,15 @@ agents-setup:
 	$(COMPOSE) restart api
 	$(COMPOSE) up -d --no-build --pull never --wait --wait-timeout 120 --no-deps api
 
-warehouse-local-check:
+# The local metadata check/setup run the MCP image, so build it first (a fresh machine has none).
+mcp-image: check
+	@test -n "$(MCP_OVERLAY)" || (echo 'Set KAI_MCP_ENABLED=true and CLICKHOUSE_HOST in .env, then run make setup.' >&2; exit 1)
+	$(COMPOSE) build clickhouse-mcp
+
+warehouse-local-check: mcp-image
 	python3 scripts/setup_local_metadata.py --check
 
-warehouse-local-setup:
+warehouse-local-setup: mcp-image
 	python3 scripts/setup_local_metadata.py --apply
 	$(MAKE) mcp-up
 

@@ -240,8 +240,10 @@ def main(argv=None):
             helper.provision(bootstrap.settings(path.read_text()))
         print('Local metadata initialized. Apply the MCP overlay separately to activate socket/key mounts; no users enrolled.')
         return 0
-    except (ValueError, OSError, json.JSONDecodeError):
-        print('Local metadata setup refused or failed; inspect configuration and local Docker privately. No secret values are printed.', file=__import__('sys').stderr)
+    except (ValueError, OSError, json.JSONDecodeError) as error:
+        # ValueError texts in this module are fixed strings (no values); other errors print their type only.
+        reason = str(error) if type(error) is ValueError else type(error).__name__
+        print(f'Local metadata setup refused or failed: {reason} No secret values are printed.', file=__import__('sys').stderr)
         return 1
 
 
