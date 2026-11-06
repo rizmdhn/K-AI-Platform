@@ -62,6 +62,8 @@ services:
       KAI_BATCH_MODEL_BASE_URL: ${KAI_BATCH_MODEL_BASE_URL:-https://ollama.com/v1}
       KAI_BATCH_MODEL: ${KAI_BATCH_MODEL:-gpt-oss:120b}
       KAI_BATCH_MODEL_API_KEY: ${KAI_BATCH_MODEL_API_KEY:-${OLLAMA_API_KEY:-}}
+      KAI_BATCH_SAMPLE_ROWS: ${KAI_BATCH_SAMPLE_ROWS:-2000}
+      KAI_BATCH_JOBS_PER_DAY: ${KAI_BATCH_JOBS_PER_DAY:-10}
       # Local bge-m3 for search_database_metadata; unreachable (documents profile off) = keyword ranking.
       KAI_EMBEDDINGS_URL: "${KAI_EMBEDDINGS_BASE_URL:-http://embeddings:8080/v1}/embeddings"
       # P6-11: audit lines also go to /var/log/kai/audit.jsonl, rotated daily, kept N days.

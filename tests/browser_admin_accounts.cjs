@@ -139,7 +139,7 @@ let step = "launch";
     step = 'General agent visible; CH absent before assignment';
     const selector = chat.getByTestId('model-selector-button');
     await selector.waitFor();
-    assert.match(await selector.textContent(), /Umum/);
+    assert.match(await selector.textContent(), /K-AI Asisten/);
     await selector.click();
     assert.equal(await chat.getByText('K-AI Analis Data', {exact:true}).count(),0);
     await chat.keyboard.press('Escape');
@@ -177,7 +177,10 @@ let step = "launch";
     const loginDenied = await chatContext.request.post('http://localhost:3080/api/auth/login',{data:{email,password}});
     step = 'disabled login';
     console.log('Disabled login HTTP',loginDenied.status());
-    assert.ok([401,403].includes(loginDenied.status()), 'Disabled login must be rejected by account policy; rerun after native rate limit clears if status429.');
+    // Native requireLocalAuth answers 404 for every local-strategy refusal (also a wrong password); the account
+    // policy refuses disabled users there, so require the policy message, not just any failure.
+    assert.ok([401,403,404].includes(loginDenied.status()), 'Disabled login must be rejected by account policy; rerun after native rate limit clears if status429.');
+    assert.equal((await loginDenied.json()).message, 'Akun tidak aktif.');
     const refreshDenied = await chatContext.request.post('http://localhost:3080/api/auth/refresh');
     step = 'disabled refresh';
     console.log('Disabled refresh HTTP',refreshDenied.status());

