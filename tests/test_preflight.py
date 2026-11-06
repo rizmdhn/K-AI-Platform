@@ -26,6 +26,13 @@ class PreflightTests(unittest.TestCase):
                                                              "KAI_MCP_ENABLED": "true", "CLICKHOUSE_HOST": "h"}
         self.assertTrue(all(status == "PASS" for status, _, _ in preflight.env_checks(env, 0o600)))
 
+    def test_bulk_labelling_is_reported_only_when_enabled(self):
+        base = {k: "x" for k in preflight.REQUIRED_SECRETS} | {"ALLOW_REGISTRATION": "false"}
+        rows = lambda env: {name: status for status, name, _ in preflight.env_checks(base | env, 0o600)}
+        self.assertNotIn("bulk labelling", rows({"OLLAMA_API_KEY": "k"}), "off by default, even with a chat key")
+        self.assertEqual(rows({"KAI_BATCH_ENABLED": "true"})["bulk labelling"], "WARN")
+        self.assertEqual(rows({"KAI_BATCH_ENABLED": "true", "OLLAMA_API_KEY": "k"})["bulk labelling"], "PASS")
+
     def test_secret_values_never_appear_in_output(self):
         env = {k: "S3CR3T-VALUE" for k in preflight.REQUIRED_SECRETS}
         self.assertNotIn("S3CR3T-VALUE", repr(preflight.env_checks(env, 0o600)))

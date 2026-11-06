@@ -143,6 +143,8 @@ async def start_row_labeling(
     estimate with a margin of error. labels: the only allowed labels. Returns a job_id; poll get_row_labeling_job.
     """
     owner = _owner()
+    if os.getenv("KAI_BATCH_ENABLED", "false").strip().lower() != "true":
+        raise GatewayError("DEPENDENCY_UNAVAILABLE", "Bulk labelling is turned off on this server by the administrator.")
     _, model, key = _config()
     if not model or not key:
         raise GatewayError("DEPENDENCY_UNAVAILABLE", "Bulk labelling is not configured on this server (model or API key missing).")
