@@ -37,6 +37,8 @@ services:
       KAI_METRICS_TOKEN: ${KAI_METRICS_TOKEN:-}
       CLICKHOUSE_SECURE: "true"
       CLICKHOUSE_VERIFY: "true"
+      # Optional private CA (path inside the container; mount the file via a compose override). Empty = public CAs.
+      CLICKHOUSE_CA_CERT: ${CLICKHOUSE_CA_CERT:-}
       CLICKHOUSE_ALLOW_WRITE_ACCESS: "false"
       CLICKHOUSE_ALLOW_DROP: "false"
       CHDB_ENABLED: "false"

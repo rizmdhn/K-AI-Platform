@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import ssl
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 import httpx2 as httpx
@@ -17,12 +18,18 @@ import enrollment_store as store
 BODY_TIMEOUT_SECONDS = 5
 
 
+def _tls():
+    # Same private CA as the query driver (CLICKHOUSE_CA_CERT), e.g. an on-prem warehouse; else public CAs.
+    ca = os.getenv("CLICKHOUSE_CA_CERT")
+    return ssl.create_default_context(cafile=ca) if ca else True
+
+
 async def verify_clickhouse(username, password, request_id):
     service = configured_service()
     try:
         async with asyncio.timeout(6):
             async with httpx.AsyncClient(
-                timeout=3, trust_env=False, follow_redirects=False, verify=True
+                timeout=3, trust_env=False, follow_redirects=False, verify=_tls(),
             ) as client:
                 async with client.stream(
                     "POST",

@@ -4,7 +4,7 @@ $(error Konfigurasi overlay ditolak; periksa .env secara privat sebelum melanjut
 endif
 COMPOSE = docker compose --project-name kai --project-directory deploy --env-file .env -f deploy/upstream/docker-compose.yml -f deploy/docker-compose.override.yml $(MCP_OVERLAY)
 
-.PHONY: setup preflight check up down logs ps test mcp-test mcp-image admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup warehouse-local-check warehouse-local-setup evals smoke-config worker-test schema-test rag-acl-test
+.PHONY: setup preflight check up down logs ps test mcp-test mcp-image admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup warehouse-local-check warehouse-local-setup evals smoke-config browser-warehouse-test worker-test schema-test rag-acl-test
 
 setup:
 	python3 scripts/bootstrap.py
@@ -105,6 +105,12 @@ test: setup
 mcp-test:
 	docker run --rm --pull never --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --mount type=bind,src=$(CURDIR)/services/clickhouse-mcp,dst=/app,readonly --entrypoint python kai-clickhouse-mcp:0.7.0 -m unittest discover -s tests -v
 
+
+# P2-11: credential lifecycle in the browser against a throwaway local TLS ClickHouse (never CH Cloud).
+# Needs Playwright (NODE_PATH, PLAYWRIGHT_BROWSERS_PATH); the MCP is restored to the .env target afterwards.
+browser-warehouse-test:
+	COMPOSE="$(COMPOSE)" bash tests/warehouse_local_tls.sh up
+	node tests/browser_warehouse_lifecycle.cjs; status=$$?; COMPOSE="$(COMPOSE)" bash tests/warehouse_local_tls.sh down; exit $$status
 
 smoke-config:
 	python3 tests/smoke_unified_env.py

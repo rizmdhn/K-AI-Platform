@@ -30,6 +30,15 @@ class WarehouseTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(factory.call_args.kwargs['follow_redirects']);self.assertTrue(factory.call_args.kwargs['verify'])
         self.assertFalse(factory.call_args.kwargs['trust_env'])
 
+    def test_private_ca_is_trusted_only_when_configured(self):
+        import ssl, certifi
+        self.assertIs(enrollment._tls(), True)
+        with mock.patch.dict(os.environ, {'CLICKHOUSE_CA_CERT': certifi.where()}):
+            context = enrollment._tls()
+        self.assertIsInstance(context, ssl.SSLContext)
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+
     async def test_bad_identity_readonly_redirect_or_oversized_reply_is_rejected(self):
         for status,body in ((200,{'ch_user':'other','readonly':1}),(200,{'ch_user':'tester','readonly':0}),
                             (302,{}),(401,{'secret':'private'}),(200,{'secret':'x'*5000})):
