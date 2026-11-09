@@ -64,6 +64,7 @@ for (const [file, target] of Object.entries({
   "AgentAccessSection.tsx": "src/components/users/AgentAccessSection.tsx",
   "kaiAgents.ts": "src/server/kaiAgents.ts",
   "users.tsx": "src/routes/_app/users.tsx",
+  "ProblemsPanel.tsx": "src/components/users/ProblemsPanel.tsx",
   "kaiAccounts.ts": "src/server/kaiAccounts.ts",
   "CreateUserDialog.tsx": "src/components/users/CreateUserDialog.tsx",
   "AccountFields.tsx": "src/components/users/AccountFields.tsx",

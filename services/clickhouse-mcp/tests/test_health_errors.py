@@ -46,7 +46,7 @@ class ErrorBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_raw_backend_errors_are_safe_and_correlated(self):
         for error, code, outcome in [
             (mw.ToolError("ACCESS_DENIED secret-password SELECT private_rows"), "ACCESS_DENIED", "access_denied"),
-            (mw.ToolError("AUTHENTICATION_FAILED secret-password"), "AUTH_REQUIRED", "auth_failed"),
+            (mw.ToolError("AUTHENTICATION_FAILED secret-password"), "AUTH_REQUIRED", "login_rejected"),
             (mw.ToolError("MEMORY_LIMIT_EXCEEDED private_rows"), "QUERY_LIMIT", "query_limit"),
             (RuntimeError("driver broke secret-password private_rows"), "DEPENDENCY_UNAVAILABLE", "error"),
         ]:

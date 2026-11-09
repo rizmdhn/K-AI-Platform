@@ -216,6 +216,21 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
       ...invitation(String(user._id), a),
     };
   }
+  // P6-10: tenant-scoped account states for the admin problem view; no hashes or credentials.
+  async function problemUsers(req) {
+    const actor = await actorFor(req, false);
+    const users = await collection
+      .find(scope(actor), { projection: { name: 1, email: 1, "kaiAccount.status": 1, "kaiAccount.warehouseRevocationPending": 1, "kaiAccount.chAclCleanupPending": 1 }, limit: 5000, maxTimeMS: 5000 })
+      .toArray();
+    return {
+      actor: { id: String(actor._id), role: actor.role, tenantId: actor.tenantId ?? null },
+      users: users.map((u) => ({
+        id: String(u._id), name: u.name ?? "", email: u.email ?? "",
+        status: u.kaiAccount?.status ?? "existing",
+        cleanupPending: u.kaiAccount?.warehouseRevocationPending === true || u.kaiAccount?.chAclCleanupPending === true,
+      })),
+    };
+  }
   async function read(req) {
     const actor = await actorFor(req, false);
     return accountDto(await targetFor(actor, req.params.id, false));
@@ -453,6 +468,7 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
     warehouseRevocationContext,
     completeWarehouseRevocation,
     internalWarehouseUser,
+    problemUsers,
   };
 }
 module.exports = {

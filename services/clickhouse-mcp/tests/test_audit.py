@@ -66,7 +66,7 @@ class AuditTests(unittest.TestCase):
             ("run_query", {"query": "SELECT 1"}, ALICE,
              raising("Query execution failed: Code: 497. DB::Exception: ACCESS_DENIED"), "access_denied"),
             ("list_tables", {"database": "sales"}, ALICE,
-             raising("Code: 516. AUTHENTICATION_FAILED"), "auth_failed"),
+             raising("Code: 516. AUTHENTICATION_FAILED"), "login_rejected"),
         ]
         for tool, args, headers, call_next, expected in cases:
             with self.subTest(expected=expected):

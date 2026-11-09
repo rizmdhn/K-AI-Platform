@@ -44,6 +44,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-}
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      # Chat history search (Meilisearch); each user only finds their own conversations.
+      SEARCH: ${SEARCH:-true}
       ADMIN_PANEL_URL: ${ADMIN_PANEL_URL:-http://localhost:3081}
       DEBUG_LOGGING: ${DEBUG_LOGGING:-false}
       DEBUG_CONSOLE: ${DEBUG_CONSOLE:-false}

@@ -45,3 +45,11 @@ export interface WarehouseReadiness {
 }
 export const warehouseReadinessFn = createServerFn({ method: 'GET' }).inputValidator(z.object({ id }).strict())
   .handler(async ({ data }): Promise<WarehouseReadiness> => call(`/api/admin/users/${data.id}/kai-warehouse/readiness`, SystemCapabilities.READ_USERS));
+
+export interface Problems {
+  generated_at: string; calls_24h: number | null; errors_24h: number | null;
+  system: { code: string; check?: string; calls?: number; errors?: number }[];
+  accounts: { id: string; name: string; email: string; issues: { code: string; at?: string; count?: number }[] }[];
+}
+export const problemsFn = createServerFn({ method: 'GET' })
+  .handler(async (): Promise<Problems> => call('/api/admin/users/kai-problems', SystemCapabilities.READ_USERS));

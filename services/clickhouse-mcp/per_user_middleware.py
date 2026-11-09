@@ -32,6 +32,7 @@ from binding_credentials import get_managed_credentials
 from warehouse_enrollment import register_warehouse_routes
 from warehouse_readiness import register_readiness_routes
 from health_routes import register_health_routes
+from problems import register_problem_routes
 import gateway_metrics
 from result_limiter import ResultLimitError, limit_result
 from schema_tool import get_table_schema
@@ -222,6 +223,7 @@ class PerUserClickHouse(Middleware):
             payload = error_payload(error, record["request_id"])
             if payload["code"] == "AUTH_REQUIRED" and not isinstance(error, GatewayError):
                 # ClickHouse itself rejected the stored login; our own AUTH_REQUIRED messages stay specific.
+                record["outcome"] = "login_rejected"  # P6-10 admin view; metrics still label by error_code
                 payload["message"] = (
                     "The saved warehouse login for your account no longer works (its password may have changed). "
                     "Contact your administrator to update it."
@@ -254,6 +256,7 @@ def setup_middleware(mcp):
     gateway_metrics.register_metrics_route(mcp)
     register_warehouse_routes(mcp)
     register_readiness_routes(mcp)
+    register_problem_routes(mcp)
     mcp.add_tool(Tool.from_function(get_table_schema))
     mcp.add_tool(Tool.from_function(execute_readonly_sql))
     mcp.add_tool(Tool.from_function(search_database_metadata))

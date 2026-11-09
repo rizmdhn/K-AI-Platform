@@ -8,6 +8,20 @@ const warehouse = require("./warehouse_proxy.cjs").createWarehouseProxy({
 const agents = require("./agent_runtime.cjs");
 const warehouseActions = require('./warehouse_actions.cjs').createWarehouseActions({accounts,warehouse,agents});
 const middleware = require("~/server/middleware");
+const problems = require("./problems.cjs").createProblems({
+  accounts,
+  managedAgent: async (actor) => {
+    const config = await require("~/server/services/Config").getAppConfig({ role: actor.role, tenantId: actor.tenantId, userId: actor.id });
+    if (!config?.modelSpecs?.list?.some((spec) => spec?.name === "kai-ch")) return null;
+    const db = require("~/models");
+    const { Constants } = require("librechat-data-provider");
+    return require("./managed_agents.cjs").resolveManagedAgent(config, actor.tenantId, { getAgent: db.getAgent, findUser: db.findUser, delimiter: Constants.mcp_delimiter });
+  },
+  aclEntries: (resourceId) =>
+    require("mongoose").model("AclEntry").find({ resourceType: "agent", resourceId }, { principalType: 1, principalId: 1, permBits: 1 }).lean().maxTimeMS(3000),
+  VIEW: require("librechat-data-provider").PermissionBits.VIEW,
+  USER: require("librechat-data-provider").PrincipalType.USER,
+});
 function errorResponse(res, error) {
   if (error?.code === 11000)
     return res
@@ -29,6 +43,7 @@ function installAdmin(router) {
       errorResponse(res, error);
     }
   };
+  router.get("/kai-problems", handle(problems.list));
   router.get(
     "/:id/kai-warehouse-context",
     handle((req) => accounts.warehouseContext(req, false)),
