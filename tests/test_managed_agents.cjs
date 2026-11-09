@@ -395,3 +395,14 @@ test("an explicitly named CH model may differ from General, but the provider nev
     else process.env.KAI_CH_AGENT_MODEL = previous;
   }
 });
+test("a CH model listed for the provider endpoint by an admin (Admin Panel) is accepted; an unlisted one is not", async () => {
+  const f = persistedFixture();
+  f.state.config.endpoints = { custom: [{ name: "openAI", models: { default: ["admin-model"] } }] };
+  f.state.agent.model = "admin-model";
+  assert.equal(await f.context().canUseServers({ id: "alice" }, KEY), true);
+  f.state.agent.model = "unlisted-model";
+  assert.equal(await f.context().canUseServers({ id: "alice" }, KEY), false);
+  f.state.config.endpoints.custom[0].name = "other-endpoint"; // a list for another provider never counts
+  f.state.agent.model = "admin-model";
+  assert.equal(await f.context().canUseServers({ id: "alice" }, KEY), false);
+});

@@ -93,3 +93,19 @@ test('a CH agent from the P4-04 release (eight tools) gains the two labelling to
  f.state.agents.push({id:'agent_'+'h'.repeat(21),_id:'ch8',name:'K-AI platform - CH',author:'a'.repeat(24),provider:'Ollama Cloud',model:'approved',tools:[...eight]});
  const {warehouse}=await setup(f);assert.equal(warehouse.id,'agent_'+'h'.repeat(21));assert.equal(warehouse.tools.length,10);
 });
+test('an Admin Panel model list overrides a .env model it does not list; a listed .env model is kept',async()=>{
+ const f=fixture();f.state.config.endpoints={custom:[{name:'Ollama Cloud',models:{default:['admin-model']}}]};
+ f.deps.target={generalModel:'env-model',chModel:'env-pro'};
+ let {general,warehouse}=await setup(f);
+ assert.deepEqual([general.model,warehouse.model],['admin-model','admin-model']);
+ f.state.config.endpoints.custom[0].models.default=['env-model','env-pro'];
+ ({general,warehouse}=await setup(f));
+ assert.deepEqual([general.model,warehouse.model],['env-model','env-pro']);
+});
+test('without .env models, changing the endpoint list in the Admin Panel moves both agents on the next setup',async()=>{
+ const f=fixture();await setup(f);
+ f.state.config.endpoints={custom:[{name:'Ollama Cloud',models:{default:['new-model','other']}}]};
+ const {general,warehouse}=await setup(f);
+ assert.deepEqual([general.model,warehouse.model],['new-model','new-model']);
+ const count=f.state.writes.length;await setup(f);assert.equal(f.state.writes.length,count);
+});

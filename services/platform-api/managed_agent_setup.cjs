@@ -1,4 +1,5 @@
 // Operator-only orchestration. All persistence/ACL/config mutations use native services.
+const { endpointModels } = require("./managed_agents.cjs");
 const TOOLS = [
   "list_databases",
   "list_tables",
@@ -107,12 +108,16 @@ async function provisionManagedAgents(ownerId, deps) {
     baseline[0].preset?.endpoint === "agents"
       ? await getAgent(baseline[0].preset.agent_id)
       : null;
-  // Operator-chosen inference (e.g. Gemini on Vertex, .env KAI_AGENT_PROVIDER/..._MODEL) wins over the
-  // current agents; a provider switch must name its model. The CH model defaults to General's.
+  // Operator-chosen inference (.env KAI_AGENT_PROVIDER/..._MODEL, e.g. Gemini on Vertex) wins over the current
+  // agents; a provider switch must name its model. The CH model defaults to General's. An Admin Panel override of
+  // the endpoint's model list wins over both: a model it no longer lists is replaced by its first model.
   const currentProvider = general?.provider ?? baseline[0].preset?.endpoint;
-  const provider = target.provider || currentProvider,
-    model = target.generalModel || (provider === currentProvider ? general?.model ?? baseline[0].preset?.model : undefined),
-    chModel = target.chModel || model;
+  const provider = target.provider || currentProvider;
+  const listed = endpointModels(config, provider);
+  const approved = (candidate) => typeof candidate === "string" && candidate && (!listed.length || listed.includes(candidate));
+  const preferred = target.generalModel || (provider === currentProvider ? general?.model ?? baseline[0].preset?.model : undefined);
+  const model = approved(preferred) ? preferred : listed[0],
+    chModel = approved(target.chModel) ? target.chModel : model;
   if (
     typeof provider !== "string" ||
     !provider ||

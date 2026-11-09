@@ -62,11 +62,20 @@ function namesAgent(config, agentId) {
   );
 }
 
+// Models an admin approved for a custom endpoint (librechat.yaml or an Admin Panel override, merged in config).
+function endpointModels(config, provider) {
+  const endpoint = (Array.isArray(config?.endpoints?.custom) ? config.endpoints.custom : [])
+    .find((entry) => entry?.name === provider);
+  const listed = endpoint?.models?.default;
+  return Array.isArray(listed) ? listed.filter((model) => typeof model === "string" && model.trim()) : [];
+}
+
 async function resolveManagedAgent(
   config,
   tenantId,
-  // Both agents always share one provider (one data destination). The CH agent may use another
-  // model of that provider only when the operator names it explicitly (e.g. Gemini Pro vs Flash).
+  // Both agents always share one provider (one data destination). The CH agent may use another model of
+  // that provider only when the operator names it (.env, e.g. Gemini Pro vs Flash) or an admin lists it for
+  // that endpoint (Admin Panel).
   { getAgent, findUser, delimiter, chModel = process.env.KAI_CH_AGENT_MODEL },
 ) {
   try {
@@ -133,7 +142,7 @@ async function resolveManagedAgent(
     if (
       !(await validOwnedAgent(agent, approval.agentId)) ||
       agent.provider !== approval.provider ||
-      agent.model !== (chModel ? chModel : approval.model) ||
+      ![chModel || approval.model, ...endpointModels(config, approval.provider)].includes(agent.model) ||
       !Array.isArray(agent.tools) ||
       !agent.tools.length ||
       !agent.tools.every((key) => typeof key === "string" && allowed.has(key))
@@ -228,4 +237,4 @@ function createManagedAgentPermissionContext(req, agentId, dependencies) {
   };
 }
 
-module.exports = { createManagedAgentPermissionContext, resolveManagedAgent };
+module.exports = { createManagedAgentPermissionContext, resolveManagedAgent, endpointModels };
