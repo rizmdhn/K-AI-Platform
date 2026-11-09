@@ -75,6 +75,12 @@ for (const [file, target] of Object.entries({
 }))
   fs.copyFileSync(`/app/kai-overlays/${file}`, `${root}/${target}`);
 
+// P6-10: the native welcome page (Dashboard) opens with the "Perlu perhatian" panel for user admins.
+patch("src/components/dashboard/DashboardPage.tsx", "import { SystemCapabilities } from '@/constants';",
+  "import { SystemCapabilities } from '@/constants';\nimport { ProblemsPanel } from '@/components/users/ProblemsPanel';");
+patch("src/components/dashboard/DashboardPage.tsx", "      <section aria-label={localize('com_dash_quick_links')}>",
+  "      {hasCapability(SystemCapabilities.READ_USERS) && <ProblemsPanel />}\n      <section aria-label={localize('com_dash_quick_links')}>");
+
 // Brand the native login view without replacing its login, SSO or 2FA behavior.
 patch('src/routes/login.tsx', "import { Container } from '@clickhouse/click-ui';", "import '@/login-branding.css';");
 patch('src/routes/login.tsx', `    <Container

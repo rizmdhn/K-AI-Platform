@@ -1,5 +1,6 @@
 import { Badge, Button } from '@clickhouse/click-ui';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { problemsFn, type Problems } from '@/server/kaiAccounts';
 type Issue = Problems['accounts'][number]['issues'][number];
 type SystemIssue = Problems['system'][number];
@@ -30,7 +31,7 @@ export function ProblemsPanel() {
   const query = useQuery({ queryKey: ['kaiProblems'], queryFn: () => problemsFn(), retry: false, refetchInterval: 60000 });
   const data = query.data;
   const total = data ? data.system.length + data.accounts.length : 0;
-  return <section aria-label="Perlu perhatian" className="mb-4 rounded-lg border border-(--cui-color-stroke-default) p-4">
+  return <section aria-label="Perlu perhatian" className="rounded-lg border border-(--cui-color-stroke-default) p-4">
     <div className="flex items-center justify-between gap-2">
       <h2 className="font-medium">Perlu perhatian <Badge text={query.isPending ? 'Memuat' : query.isError ? 'Tidak tersedia' : String(total)} state={total ? 'warning' : 'neutral'} /></h2>
       <Button type="secondary" label="Periksa ulang" disabled={query.isFetching} onClick={() => void query.refetch()} />
@@ -42,6 +43,7 @@ export function ProblemsPanel() {
       <strong>{account.name || account.email}</strong> <span className="text-(--cui-color-text-muted)">{account.email}</span>
       <ul className="list-disc pl-5">{account.issues.map((issue) => <li key={issue.code}>{accountText(issue)}</li>)}</ul>
     </li>)}</ul>}
+    {data && data.accounts.length > 0 && <p className="mt-2 text-sm"><Link to="/users">Buka Users untuk memperbaiki akun</Link></p>}
     {data && <p className="mt-2 text-xs text-(--cui-color-text-muted)">Dari log audit dan status akun, tanpa menghubungi ClickHouse. Diperbarui {time(data.generated_at)}.</p>}
   </section>;
 }
