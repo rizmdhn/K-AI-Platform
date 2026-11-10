@@ -122,8 +122,17 @@ class MCPComposeTests(unittest.TestCase):
             {"clickhouse-mcp", "embeddings"},
         )
         self.assertTrue(config["networks"]["tools_private"]["internal"])
+        # vertex-proxy (internet egress) shares an internal network with api only, never with the MCP.
         self.assertEqual(
-            set(config["services"]["api"]["networks"]), {"default", "tools_private", "documents_private"}
+            {name for name, service in config["services"].items()
+             if "model_private" in service.get("networks", {})},
+            {"api", "vertex-proxy"},
+        )
+        self.assertTrue(config["networks"]["model_private"]["internal"])
+        self.assertNotIn("ports", config["services"]["vertex-proxy"])
+        self.assertEqual(set(config["services"]["vertex-proxy"]["networks"]), {"model_private", "model_egress"})
+        self.assertEqual(
+            set(config["services"]["api"]["networks"]), {"default", "tools_private", "documents_private", "model_private"}
         )
         self.assertEqual(
             set(config["services"]["admin-panel"]["networks"]), {"default"}
@@ -209,7 +218,7 @@ class MCPComposeTests(unittest.TestCase):
         self.assertEqual(ports[0][1]["target"], 443)
         self.assertEqual(
             set(config["services"]["api"]["networks"]),
-            {"default", "tools_private", "documents_private", "web"},
+            {"default", "tools_private", "documents_private", "model_private", "web"},
         )
         self.assertNotIn("web", config["services"]["clickhouse-mcp"]["networks"])
         self.assertEqual(

@@ -22,7 +22,7 @@ up: check
 
 mcp-up: check
 	@test -n "$(MCP_OVERLAY)" || (echo 'Set KAI_MCP_ENABLED=true and CLICKHOUSE_HOST in .env, then run make setup.' >&2; exit 1)
-	$(COMPOSE) up -d --build --wait --wait-timeout 180 clickhouse-mcp metadata-worker api
+	$(COMPOSE) up -d --build --wait --wait-timeout 180 clickhouse-mcp metadata-worker vertex-proxy api
 	$(MAKE) managed-chat
 
 admin-up: check

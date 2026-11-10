@@ -138,6 +138,7 @@ def main():
             "admin-panel",
             "clickhouse-mcp",
             "metadata-worker",  # idle unless KAI_CATALOG_ENABLED=true
+            "vertex-proxy",  # answers 503 until KAI_VERTEX_API_KEY and KAI_VERTEX_PROJECT_ID are set
         }
         for kind in ("volumes", "networks"):
             for resource in config.get(kind, {}).values():

@@ -59,7 +59,7 @@ def env_checks(env, mode):
     reg = value(env.get("ALLOW_REGISTRATION", "false")).lower()
     rows.append(("FAIL", "self-registration", "ALLOW_REGISTRATION=true; set false, use make admin-create")
                 if reg == "true" else ("PASS", "self-registration", "disabled"))
-    if value(env.get("KAI_AGENT_PROVIDER", "")) != "google" and not value(env.get("OLLAMA_API_KEY", "")):
+    if value(env.get("KAI_AGENT_PROVIDER", "")) not in ("google", EXPRESS) and not value(env.get("OLLAMA_API_KEY", "")):
         rows.append(("WARN", "chat model key", "OLLAMA_API_KEY empty: chat can use a key set in the Admin Panel"))
     if value(env.get("KAI_BATCH_ENABLED", "false")).lower() == "true":
         batch_key = value(env.get("KAI_BATCH_MODEL_API_KEY", "")) or value(env.get("OLLAMA_API_KEY", ""))
@@ -76,6 +76,21 @@ def env_checks(env, mode):
 
 
 API_UID = 1000  # LibreChat api container user (node)
+EXPRESS = "Vertex AI"  # librechat.yaml custom endpoint: Vertex express API key through the MCP adapter
+
+
+def vertex_express_checks(env):
+    """Express-key route: settings only (the key itself is proven by the first chat)."""
+    if value(env.get("KAI_AGENT_PROVIDER", "")) != EXPRESS:
+        return []
+    missing = [n for n in ("KAI_VERTEX_API_KEY", "KAI_VERTEX_PROJECT_ID", "KAI_GENERAL_AGENT_MODEL") if not value(env.get(n, ""))]
+    rows = [("FAIL", "Vertex express", f"empty: {', '.join(missing)}")] if missing else [
+        ("PASS", "Vertex express", "key and project set; chat content goes to Vertex AI")]
+    if value(env.get("KAI_MCP_ENABLED", "false")).lower() != "true":
+        rows.append(("FAIL", "Vertex express", "needs KAI_MCP_ENABLED=true (vertex-proxy is part of the MCP stack)"))
+    if value(env.get("KAI_VERTEX_KEY_FILE", "")):
+        rows.append(("FAIL", "Vertex express", "KAI_VERTEX_KEY_FILE is for the service-account route; leave it empty"))
+    return rows
 
 
 def vertex_checks(env, path_stat=os.stat, read=lambda p: Path(p).read_text()):
@@ -172,9 +187,9 @@ def main():
     else:
         env = settings(path.read_text())
         rows += env_checks(env, stat.S_IMODE(path.stat().st_mode))
-        rows += vertex_checks(env)
-        location = value(env.get("KAI_VERTEX_LOCATION", ""))
-        if value(env.get("KAI_AGENT_PROVIDER", "")) == "google" and re.fullmatch(r"[a-z0-9-]+", location or "-"):
+        rows += vertex_checks(env) + vertex_express_checks(env)
+        location = value(env.get("KAI_VERTEX_LOCATION", "")) or ("global" if value(env.get("KAI_AGENT_PROVIDER", "")) == EXPRESS else "")
+        if value(env.get("KAI_AGENT_PROVIDER", "")) in ("google", EXPRESS) and re.fullmatch(r"[a-z0-9-]+", location or "-"):
             host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"
             for name, url in (("Google OAuth", "https://oauth2.googleapis.com/"), ("Vertex AI", f"https://{host}/")):
                 error = reachable(url)
