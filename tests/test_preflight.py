@@ -65,6 +65,16 @@ class VertexPreflightTests(unittest.TestCase):
         self.assertEqual(self.rows({**env, "KAI_GENERAL_AGENT_MODEL": ""})["Vertex settings"][0], "FAIL")
         self.assertEqual(self.rows({"KAI_VERTEX_KEY_FILE": "/etc/kai/v.json"})["inference provider"][0], "FAIL")
 
+    def test_vertex_express_route_needs_key_project_model_and_mcp(self):
+        rows = preflight.vertex_express_checks({"KAI_AGENT_PROVIDER": "Vertex AI", "KAI_MCP_ENABLED": "true"})
+        self.assertEqual(rows[0][0], "FAIL")
+        self.assertIn("KAI_VERTEX_API_KEY", rows[0][2])
+        ok = {"KAI_AGENT_PROVIDER": "Vertex AI", "KAI_MCP_ENABLED": "true", "KAI_VERTEX_API_KEY": "k",
+              "KAI_VERTEX_PROJECT_ID": "p", "KAI_GENERAL_AGENT_MODEL": "gemini-3.5-flash"}
+        self.assertEqual([r[0] for r in preflight.vertex_express_checks(ok)], ["PASS"])
+        self.assertEqual(preflight.vertex_express_checks({**ok, "KAI_MCP_ENABLED": "false"})[1][0], "FAIL")
+        self.assertEqual(preflight.vertex_express_checks({}), [])
+
 
 if __name__ == "__main__":
     unittest.main()

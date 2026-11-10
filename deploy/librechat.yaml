@@ -38,6 +38,17 @@ endpoints:
       # Auto title on; the api build patch titles from the user's first message, so no model call is made.
       titleConvo: true
       modelDisplayLabel: Ollama Cloud
+    # Gemini on Vertex AI (express API key) through the vertex-proxy container, which sends the key as x-goog-api-key
+    # (Vertex rejects it as Bearer). Unused until KAI_AGENT_PROVIDER="Vertex AI" + make agents-setup.
+    # Model: the client-approved ID from Vertex Model Garden.
+    - name: Vertex AI
+      apiKey: "${KAI_PLATFORM_INTERNAL_TOKEN}"
+      baseURL: http://vertex-proxy:8000/v1
+      models:
+        default: [gemini-3.5-flash]
+        fetch: false
+      titleConvo: true
+      modelDisplayLabel: Gemini (Vertex AI)
   agents:
     # context = per-user "Upload as Text" (built-in PDF/DOCX parser, no RAG API or embeddings; P5-02).
     # file_search = "Upload for File Search": chunks + bge-m3 vectors in vectordb, needs make documents-up (P2-10).

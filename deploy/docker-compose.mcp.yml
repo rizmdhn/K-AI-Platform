@@ -7,6 +7,7 @@ services:
     networks:
       - default
       - tools_private
+      - model_private
     depends_on:
       clickhouse-mcp:
         condition: service_healthy
@@ -95,6 +96,41 @@ services:
   # FR-08 catalog worker: idle unless KAI_CATALOG_ENABLED=true. Drafts descriptions for empty tables/columns and
   # sends them to OpenMetadata as suggestions for the DBA. Same image as the MCP, worker code mounted read-only.
   # Reaches OpenMetadata and the model provider only; never ClickHouse, no user credentials, no tools_private.
+  # Gemini on Vertex AI with an express API key (vertex_proxy.py): LibreChat's "Vertex AI" endpoint sends here,
+  # the key goes to Google as x-goog-api-key. Separate from the MCP so chat survives MCP restarts and the MCP
+  # has no model-provider route. Empty key/project = answers 503.
+  vertex-proxy:
+    image: kai-clickhouse-mcp:0.7.0
+    pull_policy: never  # built by the clickhouse-mcp service, never pulled
+    restart: unless-stopped
+    init: true
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp
+    entrypoint: ["python", "-m", "uvicorn", "vertex_proxy:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    environment:
+      PYTHONPATH: /app
+      KAI_PLATFORM_INTERNAL_TOKEN: ${KAI_PLATFORM_INTERNAL_TOKEN:-}
+      KAI_VERTEX_API_KEY: ${KAI_VERTEX_API_KEY:-}
+      KAI_VERTEX_PROJECT_ID: ${KAI_VERTEX_PROJECT_ID:-}
+      KAI_VERTEX_LOCATION: ${KAI_VERTEX_LOCATION:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - model_private  # only api; never tools_private, so it cannot reach the MCP
+      - model_egress   # own internet route: tool_egress would also reach the MCP
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   metadata-worker:
     image: kai-clickhouse-mcp:0.7.0
     pull_policy: never  # built by the clickhouse-mcp service, never pulled
@@ -141,6 +177,9 @@ services:
 networks:
   tools_private:
     internal: true
+  model_private:
+    internal: true
+  model_egress:
   embed_private:
     internal: true
   tool_egress:
