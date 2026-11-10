@@ -7,6 +7,7 @@ Platform chat AI internal berbasis [LibreChat](https://github.com/LibreChat-AI/L
 - **Dua agent terkelola:** K-AI Asisten (chat umum dan dokumen pribadi) dan K-AI Analis Data (query ClickHouse). Pengguna tidak memilih model atau membuat agent.
 - **Akses warehouse per pengguna:** setiap pengguna memakai akun ClickHouse-nya sendiri. Password disimpan terenkripsi (AES-256-GCM) dan dipilih di server, tidak pernah dari input model.
 - **Read-only:** `readonly=1` di setiap query, validasi SQL (write, DDL, dan multi-statement ditolak), serta batas waktu, memori, dan hasil.
+- **Katalog metadata:** pencarian tabel membaca deskripsi dan tag dari OpenMetadata (sesuai grant pengguna); worker opsional mengirim draf deskripsi untuk tabel/kolom kosong sebagai suggestion untuk DBA.
 - **Fungsi AI atas data:** ringkasan, sentimen, klasifikasi, pencarian baris berdasarkan makna, draf `COMMENT` tabel untuk DBA, dan klasifikasi massal opsional.
 - **Dokumen pribadi:** RAG lokal (pgvector dan bge-m3 di CPU). Dokumen hanya bisa diakses pemiliknya.
 - **Admin Panel:** kelola pengguna, aktivasi akun, kredensial ClickHouse, akses agent, dan panel *Perlu perhatian*.
@@ -17,8 +18,9 @@ Platform chat AI internal berbasis [LibreChat](https://github.com/LibreChat-AI/L
 | Layanan | Peran |
 |---|---|
 | `api` | LibreChat (UI dan API), dengan modul platform di `services/platform-api` |
-| `admin-panel` | Admin Panel LibreChat dengan overlay di `services/admin-panel` |
+| `admin-panel` | Admin Panel (source di `services/admin-panel/panel`, turunan dari upstream) |
 | `clickhouse-mcp` | Gateway MCP read-only ke ClickHouse (`services/clickhouse-mcp`) |
+| `metadata-worker` | Draf metadata ke OpenMetadata, mati secara default (`services/metadata-worker`) |
 | `kai-metadata` | PostgreSQL untuk binding kredensial dan metadata |
 | `mongodb`, `meilisearch` | Data aplikasi dan pencarian chat |
 | `rag_api`, `vectordb`, `embeddings` | RAG dokumen dengan embedding lokal (profile `documents`) |
@@ -58,6 +60,8 @@ Seluruh konfigurasi ada di satu file, `.env`. Lihat `.env.example` untuk daftar 
 | `KAI_GENERAL_AGENT_MODEL`, `KAI_CH_AGENT_MODEL` | Model awal kedua agent. Daftar model di Admin Panel bisa meng-override-nya |
 | `KAI_MCP_ENABLED`, `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT` | Target ClickHouse (wajib HTTPS) |
 | `CLICKHOUSE_CA_CERT` | CA privat ClickHouse (opsional) |
+| `KAI_OPENMETADATA_URL`, `_TOKEN`, `_SERVICE` | Koneksi ke OpenMetadata (opsional). Cek dengan `make openmetadata-check` |
+| `KAI_CATALOG_ENABLED` | Worker draf metadata ke OpenMetadata. Default `false` |
 | `KAI_BATCH_ENABLED` | Klasifikasi massal. Default `false` |
 | `SEARCH` | Pencarian riwayat chat. Default `true` |
 | `KAI_LOG_RETENTION_DAYS` | Retensi audit log. Default 90 hari |
@@ -73,6 +77,7 @@ Secret (`CREDS_KEY`, `JWT_*`, token MCP) dibuat oleh `make setup`. Simpan salina
 | `make check` | Validasi konfigurasi Compose tanpa mencetak secret |
 | `make agents-check` | Tampilkan provider, model, dan tool kedua agent |
 | `make backup` | Backup Mongo, PostgreSQL, uploads, dokumen, dan audit log |
+| `make openmetadata-check` | Cek koneksi OpenMetadata tanpa mengirim apa pun |
 | `make metrics-up`, `make metrics` | Aktifkan dan baca metrik privat MCP |
 
 ## Tes
@@ -101,4 +106,4 @@ evals/       set evaluasi sintetis
 
 - `deploy/upstream/docker-compose.yml` adalah salinan Compose LibreChat v0.8.8 tanpa perubahan. Perubahan kAI ada di `deploy/docker-compose.override.yml`. Commit dan checksum sumbernya tercatat di `deploy/upstream/lock.json`.
 - Image upstream dikunci dengan digest.
-- LibreChat berlisensi MIT (`deploy/upstream/LICENSE`). Admin Panel adalah turunan dari [librechat-admin-panel](https://github.com/ClickHouse/librechat-admin-panel); kode sumber dan lisensi upstream-nya ikut disertakan di dalam image.
+- LibreChat berlisensi MIT (`deploy/upstream/LICENSE`). Admin Panel adalah turunan dari [librechat-admin-panel](https://github.com/ClickHouse/librechat-admin-panel) (AGPL-3.0). Source lengkap beserta perubahan kAI ada di `services/admin-panel/panel`; commit asal dan cara update di `services/admin-panel/UPSTREAM.md`. Logo panel disalin di `panel/public` dan `panel/src/assets`; perbarui juga di sana bila branding di `deploy/branding` berubah.

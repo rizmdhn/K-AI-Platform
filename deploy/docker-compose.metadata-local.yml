@@ -34,6 +34,14 @@ services:
       - kai-metadata-socket:/run/kai-metadata:ro
       - kai-metadata-binding-keys:/run/kai-binding-keys:ro
 
+  metadata-worker:
+    depends_on:
+      kai-metadata:
+        condition: service_healthy
+    volumes:
+      - kai-metadata-socket:/run/kai-metadata:ro
+      - kai-metadata-binding-keys:/run/kai-binding-keys:ro
+
 volumes:
   kai-metadata-pgdata:
     name: kai_metadata_pgdata

@@ -33,8 +33,12 @@ class ReleaseTests(unittest.TestCase):
             "services/platform-api/accounts.cjs",
             "services/platform-api/Dockerfile",
             "services/admin-panel/Dockerfile",
-            "services/admin-panel/overlays/kaiAccounts.ts",
-            "services/admin-panel/overlays/CreateUserDialog.tsx",
+            "services/admin-panel/panel/src/server/kaiAccounts.ts",
+            "services/admin-panel/panel/src/components/users/CreateUserDialog.tsx",
+            "services/admin-panel/panel/patches/react-movable+3.4.1.patch",
+            "services/admin-panel/panel/.env",
+            "services/admin-panel/panel/node_modules/x/index.js",
+            "services/admin-panel/panel/.github/workflows/ci.yml",
             "services/admin-panel/private/.env",
             "deploy/runtime/.env",
             "deploy/runtime/metrics.env",
@@ -51,7 +55,8 @@ class ReleaseTests(unittest.TestCase):
         import re
         needed = set()
         for dockerfile in ROOT.glob("**/Dockerfile"):
-            if any(part in {"node_modules", ".venv", "runtime"} for part in dockerfile.parts):
+            # panel/Dockerfile is the upstream Admin Panel's own; ours is services/admin-panel/Dockerfile.
+            if any(part in {"node_modules", ".venv", "runtime", "panel"} for part in dockerfile.parts):
                 continue
             for line in dockerfile.read_text().splitlines():
                 match = re.match(r"\s*COPY\s+(?!--from)(?:--\S+\s+)*(.+)\s+\S+\s*$", line)
@@ -59,12 +64,13 @@ class ReleaseTests(unittest.TestCase):
                     for path in dockerfile.parent.glob(source.rstrip("/")):
                         files = path.rglob("*") if path.is_dir() else [path]
                         needed |= {f.relative_to(ROOT).as_posix() for f in files if f.is_file() and f.name != ".DS_Store"}
+        needed = {n for n in needed if not n.startswith(release.PANEL) or release.panel_file(n)}  # .dockerignore
         for compose in (ROOT / "deploy").glob("*.yml"):
             for source in re.findall(r"^\s*-\s*(\.\.?/[^:${}]+):", compose.read_text(), re.M):
                 path = (compose.parent / source).resolve()
                 if path.is_file():
                     needed.add(path.relative_to(ROOT).as_posix())
-        self.assertIn("services/admin-panel/overlays/login-branding.css", needed)
+        self.assertIn("services/admin-panel/panel/src/login-branding.css", needed)
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "release.tgz"
             release.package(ROOT, output)
@@ -91,7 +97,11 @@ class ReleaseTests(unittest.TestCase):
                 self.assertIn("Makefile", names)
                 self.assertIn("db/migrate.sql", names)
                 self.assertIn("services/platform-api/accounts.cjs", names)
-                self.assertIn("services/admin-panel/overlays/kaiAccounts.ts", names)
+                self.assertIn("services/admin-panel/panel/src/server/kaiAccounts.ts", names)
+                self.assertIn("services/admin-panel/panel/patches/react-movable+3.4.1.patch", names)
+                self.assertNotIn("services/admin-panel/panel/.env", names)
+                self.assertNotIn("services/admin-panel/panel/node_modules/x/index.js", names)
+                self.assertNotIn("services/admin-panel/panel/.github/workflows/ci.yml", names)
                 self.assertNotIn("services/admin-panel/private/.env", names)
                 self.assertNotIn(".env", names)
                 self.assertIn(".env.example", names)

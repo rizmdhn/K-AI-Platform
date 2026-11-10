@@ -47,6 +47,22 @@ class MetadataSearchTests(unittest.TestCase):
         wide = {"database": "gold", "name": "lebar", "comment": "", "columns": [{"name": f"kolom_{i}", "column_type": "String"} for i in range(2000)]}
         self.assertEqual(len(metadata_search._describe(wide)), metadata_search.MAX_DESCRIPTION_CHARS)
 
+    def test_openmetadata_enriches_only_visible_tables_and_columns(self):
+        catalog = {("gold", "cuaca"): {"description": "Omzet toko harian.", "tags": ["Glossary.Omzet"],
+                                       "columns": {"suhu": "Nilai", "rahasia": "kolom yang tidak di-grant"}},
+                   ("hr", "gaji"): {"description": "Gaji karyawan."}}
+        async def fake_catalog():
+            return catalog
+        with mock.patch.object(metadata_search, "EMBEDDINGS_URL", ""), mock.patch.object(metadata_search, "approved_metadata", fake_catalog):
+            result = search("omzet", limit=5)
+        top = result["results"][0]
+        self.assertEqual((top["table"], top["description"], top["column_meanings"]), ("cuaca", "Omzet toko harian.", {"suhu": "Nilai"}))
+        self.assertIn("OpenMetadata", top["description_source"])
+        text = json.dumps(result)
+        self.assertNotIn("gaji", text.lower())
+        self.assertNotIn("rahasia", text)
+        self.assertNotIn("description", result["results"][1])
+
     def test_rejects_bad_arguments(self):
         for query, limit in (("", 5), ("x" * 1001, 5), ("ok", 0), ("ok", 21)):
             with self.subTest(query=query[:5], limit=limit), self.assertRaises(GatewayError):

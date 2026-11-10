@@ -14,36 +14,47 @@ PATTERNS=('Makefile','.env.example','deploy/*.yml','deploy/librechat.yaml','depl
           'deploy/upstream/LICENSE','deploy/upstream/lock.json','deploy/proxy/Caddyfile',
           'deploy/branding/Dockerfile','deploy/branding/.dockerignore','deploy/branding/*.mjs','deploy/branding/*.svg',
           'services/platform-api/Dockerfile','services/platform-api/.dockerignore','services/platform-api/*.cjs','services/platform-api/*.mjs',
-          'services/admin-panel/Dockerfile','services/admin-panel/.dockerignore','services/admin-panel/*.mjs','services/admin-panel/overlays/*',
+          'services/admin-panel/Dockerfile','services/admin-panel/.dockerignore','services/admin-panel/UPSTREAM.md',
           'services/metadata-worker/*.py','services/metadata-worker/requirements.txt',
           'scripts/*.py','scripts/*.cjs','scripts/*.sh','deploy/*.sh','deploy/demo/*','services/clickhouse-mcp/*.py','services/clickhouse-mcp/Dockerfile',
           'services/clickhouse-mcp/.dockerignore','services/clickhouse-mcp/requirements.txt','db/*.sql','db/migrations/*.sql')
 REQUIRED={'Makefile','deploy/librechat.yaml','deploy/docker-compose.override.yml','deploy/upstream/docker-compose.yml'}
 MAX_BYTES=16*1024*1024
-MAX_FILES=500
+MAX_FILES=1000
+# Admin Panel source (fork of the upstream panel, built on the server): every file at any depth, except dot-paths
+# (editor/CI/env files) other than .npmrc, and build outputs. Allowlisted by prefix instead of per-depth globs.
+PANEL='services/admin-panel/panel/'
+PANEL_SKIP={'node_modules','dist','.tanstack'}
+
+
+def panel_file(name):
+    parts=PurePosixPath(name).parts[3:]
+    return name.startswith(PANEL) and bool(parts) and not any(p in PANEL_SKIP or (p.startswith('.') and p!='.npmrc') for p in parts)
 
 
 def allowed(name):
     parts=PurePosixPath(name).parts
-    if name!=PurePosixPath(name).as_posix() or not re.fullmatch(r'[A-Za-z0-9_./-]+',name) or name.startswith('/') or any(p in ('.','..') for p in name.split('/')):
+    if name!=PurePosixPath(name).as_posix() or not re.fullmatch(r'[A-Za-z0-9_./+-]+',name) or name.startswith('/') or any(p in ('.','..') for p in name.split('/')):
         return False
+    if panel_file(name):
+        return True
     # Match globs at their exact depth: '*' must never include a private subdirectory.
     return any(len(parts)==len(PurePosixPath(pattern).parts) and PurePosixPath(name).match(pattern) for pattern in PATTERNS)
 
 
 def package(source,output):
     source=Path(source).resolve();files={}
-    for pattern in PATTERNS:
-        for path in source.glob(pattern):
-            name=path.relative_to(source).as_posix()
-            if not allowed(name):raise ValueError('Disallowed release source path')
-            for parent in [path,*path.parents]:
-                if parent==source:break
-                if parent.is_symlink():raise ValueError('Release sources must not contain symlinks')
-            info=path.lstat()
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1:raise ValueError('Release sources must be unlinked regular files')
-            if path.stat().st_size>MAX_BYTES:raise ValueError('Release sources exceed size limit')
-            files[name]=path.read_bytes()
+    panel=[p for p in (source/PANEL).rglob('*') if p.is_file() and panel_file(p.relative_to(source).as_posix())]
+    for path in [path for pattern in PATTERNS for path in source.glob(pattern)]+panel:
+        name=path.relative_to(source).as_posix()
+        if not allowed(name):raise ValueError('Disallowed release source path')
+        for parent in [path,*path.parents]:
+            if parent==source:break
+            if parent.is_symlink():raise ValueError('Release sources must not contain symlinks')
+        info=path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1:raise ValueError('Release sources must be unlinked regular files')
+        if path.stat().st_size>MAX_BYTES:raise ValueError('Release sources exceed size limit')
+        files[name]=path.read_bytes()
     if not REQUIRED.issubset(files) or len(files)>MAX_FILES or sum(map(len,files.values()))>MAX_BYTES:
         raise ValueError('Release sources are incomplete or exceed limits')
     manifest={'version':1,'files':{name:hashlib.sha256(data).hexdigest() for name,data in sorted(files.items())}}

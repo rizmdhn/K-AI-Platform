@@ -14,7 +14,10 @@ import bootstrap
 RUNTIME_ROLES = {
     'KAI_BINDING_DSN': 'kai_binding_runtime',
     'KAI_ENROLLMENT_DSN': 'kai_enrollment_runtime',
+    'KAI_CATALOG_DSN': 'kai_catalog_runtime',
 }
+# Added after first release: an existing install without it gets one generated instead of being refused.
+LATER_ROLES = {'KAI_CATALOG_DSN'}
 LOCAL_KEY_DIR = '/run/kai-binding-keys'
 HEX_SECRET = r'[0-9a-f]{64}'
 VOLUMES = {'kai_metadata_pgdata': 'kai-metadata-pgdata', 'kai_metadata_socket': 'kai-metadata-socket',
@@ -57,7 +60,7 @@ def configuration_updates(fields):
             missing.append(name)
     if len(existing) != len(set(existing)):
         raise ValueError('Local metadata passwords must be distinct.')
-    if flag == 'true' and (not admin or missing):
+    if flag == 'true' and (not admin or set(missing) - LATER_ROLES):
         raise ValueError('Incomplete enabled local metadata configuration; inspect privately.')
     updates = {}
     if not admin:
@@ -195,11 +198,11 @@ class LocalMetadata:
                   '--entrypoint', 'python', 'kai-clickhouse-mcp:0.7.0', '-c',
                   "from credential_crypto import load_keyring; keys=load_keyring('/run/kai-binding-keys'); assert 1 in keys and len(keys[1]) == 32"])
         self.run(self.psql(''), input=OWNER_SQL)
-        for filename in ('migrate_identity.sql', 'migrate_approvals.sql', 'migrate_enrollment.sql', 'migrate_admin_warehouse.sql', 'migrate_revocation_fence.sql'):
+        for filename in ('migrate_identity.sql', 'migrate_approvals.sql', 'migrate_enrollment.sql', 'migrate_admin_warehouse.sql', 'migrate_revocation_fence.sql', 'migrate.sql'):
             self.run(self.psql(''), input='SET ROLE kai_migrator;\n\\i /migrations/' + filename + '\n')
-        for filename in ('create_binding_roles.sql', 'create_enrollment_role.sql'):
+        for filename in ('create_binding_roles.sql', 'create_enrollment_role.sql', 'create_catalog_role.sql'):
             self.run(self.psql(''), input='\\i /migrations/' + filename + '\n')
-        for filename in ('grant_mcp_bindings.sql', 'grant_enrollment_access.sql'):
+        for filename in ('grant_mcp_bindings.sql', 'grant_enrollment_access.sql', 'grant_catalog_access.sql'):
             self.run(self.psql(''), input='SET ROLE kai_migrator;\n\\i /migrations/' + filename + '\n')
         self.run(self.psql(''), input='\\i /migrations/provision_warehouse_runtime.sql\n')
         for name, role in RUNTIME_ROLES.items():

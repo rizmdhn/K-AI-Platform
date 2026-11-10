@@ -1,33 +1,58 @@
 // Operator command: run inside the pinned LibreChat API container.
+// First-install seed only: once applied (marker in Mongo, next to the roles), role permissions belong to the
+// Admin Panel and updates/restarts never reset them. Role permissions are not set in librechat.yaml for the
+// same reason: LibreChat re-applies YAML role settings on every start.
+const MARKER = 'role-policy-v1';
+// Former librechat.yaml interface settings, now seeded once for USER and ADMIN.
+const FEATURES = {
+  FILE_SEARCH: { USE: true },
+  WEB_SEARCH: { USE: false },
+  RUN_CODE: { USE: false },
+  SCHEDULES: { USE: false, CREATE: false },
+  SHARED_LINKS: { CREATE: false, SHARE: false, SHARE_PUBLIC: false },
+};
 const POLICY = {
-  AGENTS: { USE: true, CREATE: false, SHARE: false, SHARE_PUBLIC: false },
-  MCP_SERVERS: { USE: false, CREATE: false, SHARE: false, SHARE_PUBLIC: false, CONFIGURE_OBO: false },
-  MULTI_CONVO: { USE: false },
-  // Agents-over-API (API keys, sharing). Unused by kAI; ADMIN keeps it (owner, 6 Nov 2026).
-  REMOTE_AGENTS: { USE: false, CREATE: false, SHARE: false, SHARE_PUBLIC: false },
+  USER: {
+    ...FEATURES,
+    AGENTS: { USE: true, CREATE: false, SHARE: false, SHARE_PUBLIC: false },
+    MCP_SERVERS: { USE: false, CREATE: false, SHARE: false, SHARE_PUBLIC: false, CONFIGURE_OBO: false },
+    MULTI_CONVO: { USE: false },
+    // Agents-over-API (API keys, sharing). Unused by kAI; ADMIN keeps it (owner, 6 Nov 2026).
+    REMOTE_AGENTS: { USE: false, CREATE: false, SHARE: false, SHARE_PUBLIC: false },
+  },
+  ADMIN: FEATURES,
 };
 
-async function configureManagedChat({ getRoleByName, updateRoleByName }) {
-  const role = await getRoleByName('USER');
-  if (role?.name !== 'USER') throw new Error('USER role is unavailable. Start LibreChat first.');
-  const updates = {};
-  for (const [type, actions] of Object.entries(POLICY)) {
-    for (const [action, value] of Object.entries(actions)) {
-      if (role.permissions?.[type]?.[action] !== value) {
-        updates[`permissions.${type}.${action}`] = value;
+function matches(role, policy) {
+  return Object.entries(policy).every(([type, actions]) =>
+    Object.entries(actions).every(([action, value]) => role?.permissions?.[type]?.[action] === value));
+}
+
+// marker: { isSet(), set() }; without one (tests, manual runs) the policy is enforced like before.
+async function configureManagedChat({ getRoleByName, updateRoleByName }, marker) {
+  if (marker && await marker.isSet()) return false;
+  const roles = {};
+  for (const name of Object.keys(POLICY)) {
+    roles[name] = await getRoleByName(name);
+    if (roles[name]?.name !== name) throw new Error(`${name} role is unavailable. Start LibreChat first.`);
+  }
+  let changed = false;
+  for (const [name, policy] of Object.entries(POLICY)) {
+    const updates = {};
+    for (const [type, actions] of Object.entries(policy)) {
+      for (const [action, value] of Object.entries(actions)) {
+        if (roles[name].permissions?.[type]?.[action] !== value) updates[`permissions.${type}.${action}`] = value;
       }
     }
-  }
-  if (!Object.keys(updates).length) return false;
-  const saved = await updateRoleByName('USER', updates);
-  for (const [type, actions] of Object.entries(POLICY)) {
-    for (const [action, value] of Object.entries(actions)) {
-      if (saved?.name !== 'USER' || saved.permissions?.[type]?.[action] !== value) {
-        throw new Error('Managed USER policy was not applied. Retry setup before inviting users.');
-      }
+    if (!Object.keys(updates).length) continue;
+    const saved = await updateRoleByName(name, updates);
+    if (saved?.name !== name || !matches(saved, policy)) {
+      throw new Error('Managed role policy was not applied. Retry setup before inviting users.');
     }
+    changed = true;
   }
-  return true;
+  if (marker) await marker.set();
+  return changed;
 }
 
 module.exports = { configureManagedChat };
@@ -43,8 +68,15 @@ if (require.main === module) {
       await mongoose.connect(process.env.MONGO_URI, {
         autoIndex: false, autoCreate: false, serverSelectionTimeoutMS: 5000,
       });
-      const changed = await configureManagedChat(db);
-      console.log(changed ? 'Managed USER chat policy applied.' : 'Managed USER chat policy already applied.');
+      const setup = mongoose.connection.db.collection('kai_setup');
+      const marker = {
+        isSet: async () => Boolean(await setup.findOne({ _id: MARKER })),
+        set: () => setup.updateOne({ _id: MARKER }, { $setOnInsert: { at: new Date() } }, { upsert: true }),
+      };
+      const already = await marker.isSet();
+      const changed = await configureManagedChat(db, marker);
+      console.log(already ? 'Role permissions are managed in the Admin Panel; first-install policy not reapplied.'
+        : changed ? 'First-install role policy applied.' : 'First-install role policy already in place.');
     } finally {
       await mongoose.disconnect();
     }

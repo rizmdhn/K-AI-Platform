@@ -1,0 +1,20 @@
+# https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "cron"
+      cronjob: "0 9 1,15 * *"
+
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "cron"
+      cronjob: "0 9 1,15 * *"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "cron"
+      cronjob: "0 9 1,15 * *"

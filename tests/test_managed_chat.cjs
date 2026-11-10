@@ -61,16 +61,17 @@ test("ordinary users can chat but cannot create/share agents or configure MCP", 
   });
   assert.equal(roles.USER.permissions.MULTI_CONVO.USE, false);
   assert.deepEqual(roles.USER.permissions.REMOTE_AGENTS, { USE: false, CREATE: false, SHARE: false, SHARE_PUBLIC: false });
-  assert.equal(writes.length, 1);
-  assert.equal(writes[0].name, "USER");
+  assert.deepEqual(roles.USER.permissions.WEB_SEARCH, { USE: false });
+  assert.deepEqual(writes.map((w) => w.name), ["USER", "ADMIN"]);
 });
 
-test("preserves administrator/custom roles and unrelated USER fields", async () => {
+test("ADMIN only gets feature defaults; custom roles and unrelated USER fields are kept", async () => {
   const { roles, db } = fixture();
-  const admin = structuredClone(roles.ADMIN);
   const analyst = structuredClone(roles.analyst);
   await configureManagedChat(db);
-  assert.deepEqual(roles.ADMIN, admin);
+  assert.deepEqual(roles.ADMIN.permissions.AGENTS, { CREATE: true });
+  assert.deepEqual(roles.ADMIN.permissions.FILE_SEARCH, { USE: true });
+  assert.equal(roles.ADMIN.permissions.MCP_SERVERS, undefined);
   assert.deepEqual(roles.analyst, analyst);
   assert.deepEqual(roles.USER.permissions.BOOKMARKS, { USE: true });
   assert.equal(roles.USER.description, "keep description");
@@ -80,7 +81,27 @@ test("rerun is idempotent and does not rewrite a matching policy", async () => {
   const { db, writes } = fixture();
   await configureManagedChat(db);
   assert.equal(await configureManagedChat(db), false);
-  assert.equal(writes.length, 1);
+  assert.equal(writes.length, 2);
+});
+
+test("after the first install, Admin Panel changes are never reset", async () => {
+  const { roles, db, writes } = fixture();
+  let set = false;
+  const marker = { isSet: async () => set, set: async () => { set = true; } };
+  assert.equal(await configureManagedChat(db, marker), true);
+  assert.equal(set, true);
+  roles.USER.permissions.WEB_SEARCH.USE = true; // admin enables web search in the panel
+  assert.equal(await configureManagedChat(db, marker), false);
+  assert.equal(roles.USER.permissions.WEB_SEARCH.USE, true);
+  assert.equal(writes.length, 2);
+});
+
+test("a failed first install leaves the marker unset so setup retries", async () => {
+  const { db } = fixture();
+  let set = false;
+  db.updateRoleByName = async () => { throw new Error("database unavailable"); };
+  await assert.rejects(configureManagedChat(db, { isSet: async () => set, set: async () => { set = true; } }));
+  assert.equal(set, false);
 });
 
 test("atomic dotted updates preserve unrelated concurrent admin changes", async () => {

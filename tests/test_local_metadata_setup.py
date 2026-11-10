@@ -26,16 +26,21 @@ class LocalMetadataSetupTests(unittest.TestCase):
             dsn = self.setup.bootstrap.value(fields[name])
             self.assertRegex(dsn, rf'^host=/run/kai-metadata dbname=kai_metadata user={role} password=[0-9a-f]{{64}}$')
             passwords.append(dsn.rsplit('=', 1)[1])
-        self.assertEqual(len(set(passwords)), 3)
+        self.assertEqual(len(set(passwords)), 4)
         self.assertEqual(self.setup.configuration_updates(fields), {})
 
     def test_legacy_approval_secret_is_ignored_and_preserved(self):
         fields = {**self.fields(), 'KAI_APPROVAL_DSN': 'legacy-secret-left-untouched'}
         updates = self.setup.configuration_updates(fields)
         self.assertNotIn('KAI_APPROVAL_DSN', updates)
-        self.assertEqual(len(self.setup.RUNTIME_ROLES), 2)
+        self.assertEqual(len(self.setup.RUNTIME_ROLES), 3)
         fields.update(updates)
         self.assertEqual(self.setup.configuration_updates(fields), {})
+
+    def test_existing_install_without_catalog_dsn_gets_one(self):
+        fields = {**self.fields(), **self.setup.configuration_updates(self.fields())}
+        del fields['KAI_CATALOG_DSN']
+        self.assertEqual(list(self.setup.configuration_updates(fields)), ['KAI_CATALOG_DSN'])
 
     def test_refuses_external_dsn_or_host_keyring_without_generating_secrets(self):
         for setting, raw in [('KAI_BINDING_DSN', 'postgresql://external/db'),
@@ -123,6 +128,8 @@ class LocalMetadataSetupTests(unittest.TestCase):
         scripts = [data for _, data in calls if data]
         self.assertIn('SET ROLE kai_migrator;\n\\i /migrations/migrate_identity.sql\n', scripts)
         self.assertIn('SET ROLE kai_migrator;\n\\i /migrations/migrate_admin_warehouse.sql\n', scripts)
+        self.assertIn('SET ROLE kai_migrator;\n\\i /migrations/migrate.sql\n', scripts)
+        self.assertIn('SET ROLE kai_migrator;\n\\i /migrations/grant_catalog_access.sql\n', scripts)
         self.assertFalse(any('kai_approval_runtime' in ' '.join(command) for command, _ in calls))
         self.assertFalse(any('restart' in command for command, _ in calls))
         self.assertIn('--network', calls[2][0])

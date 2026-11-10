@@ -215,9 +215,7 @@ services:
     profiles: [admin]
     container_name: !reset null
     build:
-      context: ../services/admin-panel
-      additional_contexts:
-        kai_branding: ./branding
+      context: ../services/admin-panel  # panel/ = Admin Panel source with K-AI changes (see UPSTREAM.md)
     image: kai-admin-panel:0.1.0
     environment:
       API_SERVER_URL: ${KAI_LIBRECHAT_INTERNAL_URL:-http://api:${PORT:-3080}}

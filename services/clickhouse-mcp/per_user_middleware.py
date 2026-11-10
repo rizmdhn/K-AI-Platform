@@ -33,6 +33,8 @@ from warehouse_enrollment import register_warehouse_routes
 from warehouse_readiness import register_readiness_routes
 from health_routes import register_health_routes
 from problems import register_problem_routes
+import integration_settings
+from integration_settings import register_integration_routes
 import gateway_metrics
 from result_limiter import ResultLimitError, limit_result
 from schema_tool import get_table_schema
@@ -47,18 +49,23 @@ from tool_errors import ERROR_OUTCOMES, GatewayError, error_payload
 audit = logging.getLogger("kai.audit")
 
 
-def _retention_days():
-    raw = os.getenv("KAI_LOG_RETENTION_DAYS") or "90"
+def _retention_days(values=None):
+    """Admin Panel (limits) or KAI_LOG_RETENTION_DAYS; 90 when unset."""
+    raw = (values if values is not None else integration_settings.current()).get("KAI_LOG_RETENTION_DAYS") or "90"
     if not raw.isdigit() or not 1 <= int(raw) <= 3650:
         raise RuntimeError("KAI_LOG_RETENTION_DAYS must be a whole number of days between 1 and 3650.")
     return int(raw)
 
 
+_audit_files = []
+
+
 def attach_audit_file(directory):
-    """P6-11: also keep audit lines on disk, one file per UTC day, for KAI_LOG_RETENTION_DAYS days."""
+    """P6-11: also keep audit lines on disk, one file per UTC day, for the configured retention (live-updated)."""
     handler = logging.handlers.TimedRotatingFileHandler(
         os.path.join(directory, "audit.jsonl"), when="midnight", utc=True, backupCount=_retention_days()
     )
+    _audit_files.append(handler)
     formatter = logging.Formatter('{"ts":"%(asctime)s","audit":%(message)s}', "%Y-%m-%dT%H:%M:%SZ")
     formatter.converter = time.gmtime
     handler.setFormatter(formatter)
@@ -71,14 +78,19 @@ if os.getenv("KAI_AUDIT_LOG_DIR"):
 SQL_FIELDS = {"run_query": "query", "execute_readonly_sql": "sql", "search_rows_by_meaning": "sql"}
 # Tools that also carry SQL (policy check + audit hash) but return no query rows, so no result limiting.
 CHECKED_SQL_FIELDS = {**SQL_FIELDS, "start_row_labeling": "sql"}
-# Server-side ceilings sent with every query (P3-03). The DBA settings profile stays authoritative:
-# any of these it locks (CONST/readonly) is dropped below and the profile value applies.
-QUERY_LIMITS = {
-    "max_execution_time": int(os.getenv("KAI_CH_MAX_EXECUTION_TIME") or "25"),  # below the MCP 30 s timeout
-    "max_memory_usage": int(os.getenv("KAI_CH_MAX_MEMORY_USAGE") or str(4 * 1024**3)),
-    "max_rows_to_read": int(os.getenv("KAI_CH_MAX_ROWS_TO_READ") or str(10**9)),
-    "max_bytes_to_read": int(os.getenv("KAI_CH_MAX_BYTES_TO_READ") or str(100 * 1024**3)),
-}
+# Server-side ceilings sent with every query (P3-03), set in the Admin Panel (limits) or .env. The DBA settings
+# profile stays authoritative: any of these it locks (CONST/readonly) is dropped below and the profile value applies.
+def query_limits(values):
+    days = integration_settings.limit(values, "KAI_LOG_RETENTION_DAYS")
+    for handler in _audit_files:
+        handler.backupCount = days  # retention changes apply at the next rotation
+    limit = lambda key: integration_settings.limit(values, key)
+    return {
+        "max_execution_time": min(29, limit("KAI_CH_MAX_EXECUTION_TIME")),  # below the MCP 30 s timeout
+        "max_memory_usage": limit("KAI_CH_MAX_MEMORY_USAGE"),
+        "max_rows_to_read": limit("KAI_CH_MAX_ROWS_TO_READ"),
+        "max_bytes_to_read": limit("KAI_CH_MAX_BYTES_TO_READ"),
+    }
 # A DBA profile may lock settings (e.g. Docs/user_matrix.md: readonly=2 and CONST limits). Sending
 # a locked setting fails every query, so let the profile win: drop settings locked for this user.
 clickhouse_connect.common.set_setting("invalid_setting_action", "drop")
@@ -176,7 +188,8 @@ class PerUserClickHouse(Middleware):
                 {
                     "username": user,
                     "password": password,
-                    "settings": {**QUERY_LIMITS, "readonly": 1, "log_comment": record["request_id"]},
+                    "settings": {**query_limits(await asyncio.to_thread(integration_settings.current)),
+                                 "readonly": 1, "log_comment": record["request_id"]},
                 },
                 serializable=False,
             )
@@ -257,6 +270,7 @@ def setup_middleware(mcp):
     register_warehouse_routes(mcp)
     register_readiness_routes(mcp)
     register_problem_routes(mcp)
+    register_integration_routes(mcp)
     mcp.add_tool(Tool.from_function(get_table_schema))
     mcp.add_tool(Tool.from_function(execute_readonly_sql))
     mcp.add_tool(Tool.from_function(search_database_metadata))

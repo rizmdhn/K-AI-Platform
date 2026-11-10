@@ -4,7 +4,7 @@ $(error Konfigurasi overlay ditolak; periksa .env secara privat sebelum melanjut
 endif
 COMPOSE = docker compose --project-name kai --project-directory deploy --env-file .env -f deploy/upstream/docker-compose.yml -f deploy/docker-compose.override.yml $(MCP_OVERLAY)
 
-.PHONY: setup preflight check up down logs ps test mcp-test mcp-image admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup warehouse-local-check warehouse-local-setup evals smoke-config browser-warehouse-test worker-test schema-test rag-acl-test
+.PHONY: setup preflight check up down logs ps test mcp-test mcp-image admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup warehouse-local-check warehouse-local-setup evals smoke-config browser-warehouse-test worker-test schema-test rag-acl-test openmetadata-check
 
 setup:
 	python3 scripts/bootstrap.py
@@ -22,7 +22,7 @@ up: check
 
 mcp-up: check
 	@test -n "$(MCP_OVERLAY)" || (echo 'Set KAI_MCP_ENABLED=true and CLICKHOUSE_HOST in .env, then run make setup.' >&2; exit 1)
-	$(COMPOSE) up -d --build --wait --wait-timeout 180 clickhouse-mcp api
+	$(COMPOSE) up -d --build --wait --wait-timeout 180 clickhouse-mcp metadata-worker api
 	$(MAKE) managed-chat
 
 admin-up: check
@@ -111,6 +111,11 @@ mcp-test:
 browser-warehouse-test:
 	COMPOSE="$(COMPOSE)" bash tests/warehouse_local_tls.sh up
 	node tests/browser_warehouse_lifecycle.cjs; status=$$?; COMPOSE="$(COMPOSE)" bash tests/warehouse_local_tls.sh down; exit $$status
+
+# OpenMetadata connection check (version, suggestions API, table counts); sends nothing, never prints the token.
+openmetadata-check: check
+	@test -n "$(MCP_OVERLAY)" || (echo 'Set KAI_MCP_ENABLED=true in .env first.' >&2; exit 1)
+	$(COMPOSE) run --rm --no-deps --entrypoint python clickhouse-mcp -m openmetadata
 
 smoke-config:
 	python3 tests/smoke_unified_env.py

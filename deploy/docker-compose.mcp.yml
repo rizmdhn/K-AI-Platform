@@ -59,6 +59,13 @@ services:
       KAI_BINDING_DSN: ${KAI_BINDING_DSN:-}
       KAI_BINDING_KEY_DIR: ${KAI_BINDING_KEY_DIR:-/run/kai-binding-keys}
       KAI_LIBRECHAT_ISSUER: ${KAI_LIBRECHAT_ISSUER:-librechat-local}
+      # FR-11: table search also shows descriptions/tags curated in the client's OpenMetadata. Set in the Admin
+      # Panel (stored via KAI_CATALOG_DSN, token encrypted with the binding keyring); these .env values are the fallback.
+      KAI_CATALOG_DSN: ${KAI_CATALOG_DSN:-}
+      KAI_OPENMETADATA_URL: ${KAI_OPENMETADATA_URL:-}
+      KAI_OPENMETADATA_TOKEN: ${KAI_OPENMETADATA_TOKEN:-}
+      KAI_OPENMETADATA_SERVICE: ${KAI_OPENMETADATA_SERVICE:-}
+      KAI_OPENMETADATA_CA_CERT: ${KAI_OPENMETADATA_CA_CERT:-}
       
       # a key saved only in the Admin Panel is not visible here. Empty key = the tool says it is not configured.
       KAI_BATCH_MODEL_BASE_URL: ${KAI_BATCH_MODEL_BASE_URL:-https://ollama.com/v1}
@@ -84,6 +91,47 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 6
+
+  # FR-08 catalog worker: idle unless KAI_CATALOG_ENABLED=true. Drafts descriptions for empty tables/columns and
+  # sends them to OpenMetadata as suggestions for the DBA. Same image as the MCP, worker code mounted read-only.
+  # Reaches OpenMetadata and the model provider only; never ClickHouse, no user credentials, no tools_private.
+  metadata-worker:
+    image: kai-clickhouse-mcp:0.7.0
+    pull_policy: never  # built by the clickhouse-mcp service, never pulled
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp
+    entrypoint: ["python", "/worker/catalog.py"]
+    environment:
+      PYTHONPATH: /worker:/app
+      # Admin Panel settings: read from Postgres, token decrypted with the binding keyring (mounted read-only).
+      KAI_BINDING_KEY_DIR: /run/kai-binding-keys
+      KAI_BINDING_ACTIVE_KEY_VERSION: ${KAI_BINDING_ACTIVE_KEY_VERSION:-1}
+      KAI_CATALOG_ENABLED: ${KAI_CATALOG_ENABLED:-false}
+      KAI_CATALOG_DSN: ${KAI_CATALOG_DSN:-}
+      KAI_CATALOG_DATABASES: ${KAI_CATALOG_DATABASES:-}
+      KAI_CATALOG_SCAN_HOURS: ${KAI_CATALOG_SCAN_HOURS:-24}
+      KAI_CATALOG_MAX_TABLES_PER_SCAN: ${KAI_CATALOG_MAX_TABLES_PER_SCAN:-50}
+      KAI_OPENMETADATA_URL: ${KAI_OPENMETADATA_URL:-}
+      KAI_OPENMETADATA_TOKEN: ${KAI_OPENMETADATA_TOKEN:-}
+      KAI_OPENMETADATA_SERVICE: ${KAI_OPENMETADATA_SERVICE:-}
+      KAI_OPENMETADATA_CA_CERT: ${KAI_OPENMETADATA_CA_CERT:-}
+      KAI_BATCH_MODEL_BASE_URL: ${KAI_BATCH_MODEL_BASE_URL:-https://ollama.com/v1}
+      KAI_BATCH_MODEL: ${KAI_BATCH_MODEL:-gpt-oss:120b}
+      KAI_BATCH_MODEL_API_KEY: ${KAI_BATCH_MODEL_API_KEY:-${OLLAMA_API_KEY:-}}
+    volumes:
+      - ../services/metadata-worker:/worker:ro
+    networks:
+      - tool_egress
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Only the local embedding server joins MCP here; it never gets tools_private.
   embeddings:

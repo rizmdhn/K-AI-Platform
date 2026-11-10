@@ -6,18 +6,9 @@ interface:
   modelSelect: false
   parameters: false
   presets: false
-  # P2-10: file_search (local RAG, bge-m3) on the user's own uploads; only the general agent has the tool.
-  fileSearch: true
-  webSearch: false
-  runCode: false
-  schedules:
-    use: false
-    create: false
-  # Agent/MCP role permissions are stored in the Admin Panel, not global YAML seeds.
-  sharedLinks:
-    create: false
-    share: false
-    public: false
+  # Role permissions (file search, web search, code, schedules, shared links, agents, MCP) are NOT set here:
+  # LibreChat re-applies YAML role settings on every start, overwriting the Admin Panel. They are seeded once by
+  # scripts/configure_managed_chat.cjs and then managed in the Admin Panel (stored in MongoDB).
 
 modelSpecs:
   enforce: true

@@ -75,7 +75,7 @@ def _json(value):
     )
 
 
-def production_client_factory(*, host, port, username, password):
+def production_client_factory(*, host, port, username, password, ca_cert=None):
     """Lazy fresh TLS clients; configuration comes only from the trusted service operator."""
     if not isinstance(host, str) or len(host) > 253:
         raise ValueError("Invalid ingestion connection configuration.")
@@ -107,6 +107,7 @@ def production_client_factory(*, host, port, username, password):
                 database="default",
                 secure=True,
                 verify=True,
+                ca_cert=ca_cert,  # private CA (CLICKHOUSE_CA_CERT); None = public CAs
                 settings=dict(SETTINGS),
                 query_limit=0,
                 query_retries=0,

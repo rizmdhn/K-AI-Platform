@@ -137,6 +137,7 @@ def main():
             "meilisearch",
             "admin-panel",
             "clickhouse-mcp",
+            "metadata-worker",  # idle unless KAI_CATALOG_ENABLED=true
         }
         for kind in ("volumes", "networks"):
             for resource in config.get(kind, {}).values():

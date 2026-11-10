@@ -11,3 +11,12 @@ services:
         read_only: true
         bind:
           create_host_path: false
+
+  metadata-worker:
+    volumes:
+      - type: bind
+        source: ${KAI_BINDING_KEY_SOURCE:?Set the absolute host keyring directory in root .env}
+        target: /run/kai-binding-keys
+        read_only: true
+        bind:
+          create_host_path: false

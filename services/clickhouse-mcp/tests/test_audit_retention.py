@@ -22,6 +22,7 @@ class AuditRetentionTests(unittest.TestCase):
                 self.assertRegex(line["ts"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
             finally:
                 mw.audit.removeHandler(handler)
+                mw._audit_files.remove(handler)
                 handler.close()
 
     def test_invalid_retention_is_refused(self):
@@ -29,6 +30,19 @@ class AuditRetentionTests(unittest.TestCase):
             with self.subTest(raw=raw), mock.patch.dict(os.environ, {"KAI_LOG_RETENTION_DAYS": raw}):
                 with self.assertRaises(RuntimeError):
                     mw._retention_days()
+
+    def test_admin_panel_limits_apply_per_query_and_retention_updates_live(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ, {"KAI_LOG_RETENTION_DAYS": "90"}):
+            handler = mw.attach_audit_file(directory)
+            try:
+                limits = mw.query_limits({"KAI_CH_MAX_EXECUTION_TIME": "60", "KAI_CH_MAX_MEMORY_USAGE": "",
+                                          "KAI_LOG_RETENTION_DAYS": "30"})
+                self.assertEqual((limits["max_execution_time"], limits["max_memory_usage"]), (29, 4 * 1024**3))
+                self.assertEqual(handler.backupCount, 30)
+            finally:
+                mw.audit.removeHandler(handler)
+                mw._audit_files.remove(handler)
+                handler.close()
 
 
 if __name__ == "__main__":

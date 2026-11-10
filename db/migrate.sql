@@ -30,4 +30,20 @@ SELECT NOT EXISTS (
     \ir migrations/001_catalog.sql
     INSERT INTO kai.schema_migrations (version) VALUES ('001_catalog');
 \endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM kai.schema_migrations WHERE version = '006_integration_settings'
+) AS apply_integration_settings \gset
+\if :apply_integration_settings
+    \ir migrations/006_integration_settings.sql
+    INSERT INTO kai.schema_migrations (version) VALUES ('006_integration_settings');
+\endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM kai.schema_migrations WHERE version = '007_more_settings'
+) AS apply_more_settings \gset
+\if :apply_more_settings
+    \ir migrations/007_more_settings.sql
+    INSERT INTO kai.schema_migrations (version) VALUES ('007_more_settings');
+\endif
 COMMIT;

@@ -28,6 +28,7 @@ from mcp_clickhouse.mcp_server import run_query_async
 from pydantic import Field
 from starlette.responses import JSONResponse, Response
 
+import integration_settings
 from sql_policy import UnsafeSQL, validate
 from tool_errors import GatewayError
 
@@ -38,17 +39,28 @@ MAX_LABELS = 20
 JOB_TTL = 24 * 3600
 LINK_TTL = 15 * 60
 MAX_ACTIVE_JOBS = 3
-SAMPLE_ROWS = min(MAX_ROWS, int(os.getenv("KAI_BATCH_SAMPLE_ROWS", "2000")))  # above MAX_ROWS: random sample
-JOBS_PER_DAY = int(os.getenv("KAI_BATCH_JOBS_PER_DAY", "10"))  # per user; ponytail: in memory, resets on restart
 RETRIES, RETRY_DELAY = 3, 2.0
 _jobs = {}  # job_id -> dict
 
 
-def _config():
+def _settings():
+    """Admin Panel (batch_model) or .env, read per job so changes apply without a restart."""
+    return integration_settings.current()
+
+
+def _number(values, key, default):
+    try:
+        return int(values.get(key) or default)
+    except ValueError:
+        return default
+
+
+def _config(values=None):
+    values = values if values is not None else _settings()
     return (
-        os.getenv("KAI_BATCH_MODEL_BASE_URL", "https://ollama.com/v1").rstrip("/"),
-        os.getenv("KAI_BATCH_MODEL", ""),
-        os.getenv("KAI_BATCH_MODEL_API_KEY", ""),
+        (values.get("KAI_BATCH_MODEL_BASE_URL") or "https://ollama.com/v1").rstrip("/"),
+        values.get("KAI_BATCH_MODEL", ""),
+        values.get("KAI_BATCH_MODEL_API_KEY", ""),
     )
 
 
@@ -75,7 +87,7 @@ def _prune():
 
 
 async def _label_batch(client, job, batch):
-    base, model, key = _config()
+    base, model, key = job["_model"]  # fixed at start: a settings change does not switch model mid-job
     numbered = "\n".join(f"{i}. {text}" for i, (_, text) in enumerate(batch))
     body = {
         "model": model,
@@ -143,9 +155,12 @@ async def start_row_labeling(
     estimate with a margin of error. labels: the only allowed labels. Returns a job_id; poll get_row_labeling_job.
     """
     owner = _owner()
-    if os.getenv("KAI_BATCH_ENABLED", "false").strip().lower() != "true":
+    values = await asyncio.to_thread(_settings)
+    if (values.get("KAI_BATCH_ENABLED") or "false").strip().lower() != "true":
         raise GatewayError("DEPENDENCY_UNAVAILABLE", "Bulk labelling is turned off on this server by the administrator.")
-    _, model, key = _config()
+    _, model, key = _config(values)
+    jobs_per_day = _number(values, "KAI_BATCH_JOBS_PER_DAY", 10)  # per user; ponytail: in memory, resets on restart
+    sample_rows = min(MAX_ROWS, _number(values, "KAI_BATCH_SAMPLE_ROWS", 2000))  # above MAX_ROWS: random sample
     if not model or not key:
         raise GatewayError("DEPENDENCY_UNAVAILABLE", "Bulk labelling is not configured on this server (model or API key missing).")
     labels = [label.strip() for label in labels]
@@ -159,21 +174,22 @@ async def start_row_labeling(
     if sum(job["status"] == "running" for job in _jobs.values()) >= MAX_ACTIVE_JOBS or any(
         job["owner"] == owner and job["status"] == "running" for job in _jobs.values()):
         raise GatewayError("QUERY_LIMIT", "Another labelling job is still running; wait for it to finish.")
-    if sum(job["owner"] == owner for job in _jobs.values()) >= JOBS_PER_DAY:
-        raise GatewayError("QUERY_LIMIT", f"Daily limit of {JOBS_PER_DAY} labelling jobs reached; try again tomorrow.")
+    if sum(job["owner"] == owner for job in _jobs.values()) >= jobs_per_day:
+        raise GatewayError("QUERY_LIMIT", f"Daily limit of {jobs_per_day} labelling jobs reached; try again tomorrow.")
     inner = sql.strip().rstrip(";")
     # Count first so a huge SELECT is never fetched just to be refused; above MAX_ROWS label a random sample.
     population = int(json.loads(await run_query_async(f"SELECT count() FROM ({inner})"))["rows"][0][0])
     sampled = population > MAX_ROWS
     payload = json.loads(await run_query_async(
-        f"SELECT * FROM ({inner}) ORDER BY rand() LIMIT {SAMPLE_ROWS}" if sampled else inner))
+        f"SELECT * FROM ({inner}) ORDER BY rand() LIMIT {sample_rows}" if sampled else inner))
     rows = [(row[0], _text(row)) for row in payload["rows"][:MAX_ROWS] if row]
     if not rows or not any(text for _, text in rows):
         raise GatewayError("INVALID_ARGUMENT", "Select an id column first, then at least one text column.")
     job_id = secrets.token_hex(16)
     _jobs[job_id] = {"owner": owner, "task": task.strip(), "labels": labels, "status": "running",
                      "created": time.time(), "total": len(rows), "results": [], "_rows": rows,
-                     "id_column": payload["columns"][0], "population": population, "sampled": sampled}
+                     "id_column": payload["columns"][0], "population": population, "sampled": sampled,
+                     "_model": _config(values)}
     asyncio.get_running_loop().create_task(_run(_jobs[job_id]))
     minutes = max(1, round(len(rows) / BATCH_SIZE * 8 / 60))
     result = {"job_id": job_id, "rows": len(rows), "estimated_minutes": minutes, "status": "running"}

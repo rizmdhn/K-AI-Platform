@@ -1,6 +1,8 @@
+# Same file set as the release package (scripts/package_release.py): no dot-files except .npmrc, no build outputs.
 *
-!Dockerfile
-!apply.mjs
-!overlays/
-!overlays/*.tsx
-!overlays/*.ts
+!panel/
+panel/node_modules
+panel/dist
+panel/.tanstack
+panel/**/.*
+!panel/.npmrc

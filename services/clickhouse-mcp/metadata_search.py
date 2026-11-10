@@ -16,6 +16,7 @@ from array import array
 import httpx2 as httpx
 from mcp_clickhouse.mcp_server import list_databases_async, list_tables_async
 
+from openmetadata import approved_metadata
 from tool_errors import GatewayError
 
 EMBEDDINGS_URL = os.getenv("KAI_EMBEDDINGS_URL", "")
@@ -27,13 +28,27 @@ MAX_DESCRIPTION_CHARS = 4000  # keeps one very wide table under the embedding se
 _cache = {}  # text -> float32 vector (array, ~4 KB for bge-m3 instead of ~32 KB as a list)
 
 
-def _describe(table):
+def _visible_view(table, approved):
+    """OpenMetadata view limited to the columns this caller's grants return (column-level grants)."""
+    if not approved:
+        return None
+    visible = {c["name"] for c in table.get("columns", [])}
+    return {**approved, "columns": {k: v for k, v in approved.get("columns", {}).items() if k in visible}}
+
+
+def _describe(table, approved=None):
+    approved = approved or {}
+    meanings = approved.get("columns", {})
     columns = ", ".join(
         f"{c['name']} ({c.get('column_type', '')}){': ' + c['comment'] if c.get('comment') else ''}"
+        + (f" [{meanings[c['name']]}]" if c["name"] in meanings else "")
         for c in table.get("columns", [])
     )
     comment = f": {table['comment']}" if table.get("comment") else ""
-    return f"{table['database']}.{table['name']}{comment}. Columns: {columns}"[:MAX_DESCRIPTION_CHARS]
+    extra = f" {approved['description']}." if approved.get("description") else ""
+    if approved.get("tags"):
+        extra += " Tags: " + ", ".join(approved["tags"]) + "."
+    return f"{table['database']}.{table['name']}{comment}.{extra} Columns: {columns}"[:MAX_DESCRIPTION_CHARS]
 
 
 def _words(text):
@@ -85,6 +100,17 @@ async def _visible_tables():
     return tables[:MAX_TABLES]
 
 
+def _approved_fields(approved):
+    if not approved:
+        return {}
+    fields = {k: approved[k] for k in ("description", "tags") if approved.get(k)}
+    if approved.get("columns"):
+        fields["column_meanings"] = dict(list(approved["columns"].items())[:MAX_COLUMNS_SHOWN])
+    if fields:
+        fields["description_source"] = "OpenMetadata, curated by the data team"
+    return fields
+
+
 async def search_database_metadata(query: str, limit: int = 5) -> str:
     """Find the tables most relevant to a question among those your ClickHouse account can see.
 
@@ -96,7 +122,10 @@ async def search_database_metadata(query: str, limit: int = 5) -> str:
     if not isinstance(limit, int) or not 1 <= limit <= 20:
         raise GatewayError("INVALID_ARGUMENT", "limit must be between 1 and 20.")
     tables = await _visible_tables()
-    docs = [_describe(t) for t in tables]
+    # Curated OpenMetadata metadata (FR-11), only for tables and columns this caller's grants already return.
+    catalog = await approved_metadata()
+    views = [_visible_view(t, catalog.get((t["database"], t["name"]))) for t in tables]
+    docs = [_describe(t, v) for t, v in zip(tables, views)]
     method = "semantic"
     try:
         if not EMBEDDINGS_URL:
@@ -106,15 +135,16 @@ async def search_database_metadata(query: str, limit: int = 5) -> str:
     except (OSError, httpx.HTTPError, KeyError, ValueError):
         method = "keyword"  # local embedding server down or not configured
         scores = _lexical(query, docs)
-    ranked = sorted(zip(scores, tables), key=lambda pair: pair[0], reverse=True)[:limit]
+    ranked = sorted(zip(scores, tables, views), key=lambda item: item[0], reverse=True)[:limit]
     results = [
         {
             "database": t["database"],
             "table": t["name"],
             "comment": t.get("comment") or None,
+            **_approved_fields(view),
             "columns": [c["name"] for c in t.get("columns", [])][:MAX_COLUMNS_SHOWN],
             "score": round(score, 3),
         }
-        for score, t in ranked
+        for score, t, view in ranked
     ]
     return json.dumps({"query": query, "method": method, "results": results}, ensure_ascii=False)

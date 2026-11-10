@@ -22,6 +22,9 @@ const problems = require("./problems.cjs").createProblems({
   VIEW: require("librechat-data-provider").PermissionBits.VIEW,
   USER: require("librechat-data-provider").PrincipalType.USER,
 });
+const integrations = require("./integrations.cjs").createIntegrations({
+  hasCapability: require("~/server/middleware/roles/capabilities").hasCapability,
+});
 function errorResponse(res, error) {
   if (error?.code === 11000)
     return res
@@ -44,6 +47,10 @@ function installAdmin(router) {
     }
   };
   router.get("/kai-problems", handle(problems.list));
+  router.post("/kai-integrations/openmetadata/test", handle(integrations.test));
+  router.get("/kai-integrations/openmetadata/databases", handle(integrations.databases));
+  router.get("/kai-integrations/:name", handle(integrations.get));
+  router.put("/kai-integrations/:name", handle(integrations.save));
   router.get(
     "/:id/kai-warehouse-context",
     handle((req) => accounts.warehouseContext(req, false)),
