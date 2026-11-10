@@ -5,7 +5,6 @@ Skipped unless MCP_E2E_URL is set. Same throwaway setup as test_e2e_per_user.py,
 Every account goes through kAI's gateway exactly as a bound user would (manual mode headers).
 """
 import json
-import os
 import unittest
 
 from test_e2e_per_user import URL, call

@@ -15,7 +15,7 @@ PATTERNS=('Makefile','.env.example','deploy/*.yml','deploy/librechat.yaml','depl
           'deploy/branding/Dockerfile','deploy/branding/.dockerignore','deploy/branding/*.mjs','deploy/branding/*.svg',
           'services/platform-api/Dockerfile','services/platform-api/.dockerignore','services/platform-api/*.cjs','services/platform-api/*.mjs',
           'services/admin-panel/Dockerfile','services/admin-panel/.dockerignore','services/admin-panel/UPSTREAM.md',
-          'services/metadata-worker/*.py','services/metadata-worker/requirements.txt',
+          'services/metadata-worker/*.py',
           'scripts/*.py','scripts/*.cjs','scripts/*.sh','deploy/*.sh','deploy/demo/*','services/clickhouse-mcp/*.py','services/clickhouse-mcp/Dockerfile',
           'services/clickhouse-mcp/.dockerignore','services/clickhouse-mcp/requirements.txt','db/*.sql','db/migrations/*.sql')
 REQUIRED={'Makefile','deploy/librechat.yaml','deploy/docker-compose.override.yml','deploy/upstream/docker-compose.yml'}

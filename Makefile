@@ -4,7 +4,7 @@ $(error Konfigurasi overlay ditolak; periksa .env secara privat sebelum melanjut
 endif
 COMPOSE = docker compose --project-name kai --project-directory deploy --env-file .env -f deploy/upstream/docker-compose.yml -f deploy/docker-compose.override.yml $(MCP_OVERLAY)
 
-.PHONY: setup preflight check up down logs ps test mcp-test mcp-image admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup warehouse-local-check warehouse-local-setup evals smoke-config browser-warehouse-test worker-test schema-test rag-acl-test openmetadata-check
+.PHONY: setup preflight check up down logs ps test mcp-test mcp-image admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup warehouse-local-check warehouse-local-setup evals smoke-config browser-warehouse-test worker-test rag-acl-test openmetadata-check
 
 setup:
 	python3 scripts/bootstrap.py
@@ -121,12 +121,7 @@ smoke-config:
 	python3 tests/smoke_unified_env.py
 
 worker-test:
-	python3 -m unittest discover -s services/metadata-worker/tests -p test_worker.py -v
-	KAI_WORKER_TEST_IMAGE=kai-clickhouse-mcp:0.7.0 python3 -m unittest discover -s db/tests -p test_worker_queue.py -v
-
-schema-test:
-	python3 -m unittest discover -s services/metadata-worker/tests -p test_schema_snapshot.py -v
-	KAI_SCHEMA_TEST_IMAGE=kai-clickhouse-mcp:0.7.0 python3 -m unittest discover -s tests -p test_schema_snapshot_integration.py -v
+	python3 -m unittest discover -s services/metadata-worker/tests -p 'test_*.py' -v
 
 rag-acl-test:
 	docker run --rm --pull never --network none --read-only --tmpfs /tmp --tmpfs /app/logs:rw,mode=1777 --cap-drop ALL --security-opt no-new-privileges --entrypoint node --mount type=bind,src=$(CURDIR)/tests/probe_native_file_acl.cjs,dst=/app/probe_native_file_acl.cjs,readonly kai-librechat:0.2.0 --test /app/probe_native_file_acl.cjs

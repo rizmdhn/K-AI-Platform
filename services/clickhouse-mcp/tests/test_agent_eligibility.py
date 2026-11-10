@@ -1,9 +1,7 @@
-import asyncio,os,unittest
+import os,unittest
 from unittest.mock import patch,AsyncMock
 from uuid import uuid4
-from types import SimpleNamespace
 from starlette.requests import Request
-from warehouse_enrollment import register_warehouse_routes
 import warehouse_enrollment as api
 class AgentEligibilityTests(unittest.IsolatedAsyncioTestCase):
  async def test_fresh_read_only_receipt_changes_with_binding_revision(self):

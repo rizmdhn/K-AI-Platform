@@ -76,7 +76,7 @@ def env_checks(env, mode):
 
 
 API_UID = 1000  # LibreChat api container user (node)
-EXPRESS = "Vertex AI"  # librechat.yaml custom endpoint: Vertex express API key through the MCP adapter
+EXPRESS = "Vertex AI"  # librechat.yaml custom endpoint: Vertex express API key through vertex-proxy
 
 
 def vertex_express_checks(env):
