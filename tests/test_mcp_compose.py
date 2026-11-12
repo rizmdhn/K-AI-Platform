@@ -89,7 +89,10 @@ class MCPComposeTests(unittest.TestCase):
         )
         self.assertEqual(key["source"], "/fixture/private-keys")
         self.assertTrue(key["read_only"])
-        self.assertFalse(key["bind"]["create_host_path"])
+        # Some Compose versions drop create_host_path from rendered JSON when it is false.
+        self.assertFalse(key.get("bind", {}).get("create_host_path", False))
+        overlay = (ROOT / "deploy/docker-compose.bindings.yml").read_text()
+        self.assertEqual(overlay.count("create_host_path: false"), overlay.count("type: bind"))
         self.assertEqual(
             config["services"]["clickhouse-mcp"]["environment"]["KAI_BINDING_KEY_DIR"],
             key["target"],
@@ -212,10 +215,10 @@ class MCPComposeTests(unittest.TestCase):
             (name, port)
             for name, service in config["services"].items()
             for port in service.get("ports", [])
+            if port.get("host_ip") != "127.0.0.1"  # Admin Panel keeps a loopback port for SSH tunnels
         ]
-        self.assertEqual(len(ports), 1)
-        self.assertEqual(ports[0][0], "reverse-proxy")
-        self.assertEqual(ports[0][1]["target"], 443)
+        self.assertEqual({name for name, _ in ports}, {"reverse-proxy"})
+        self.assertEqual(sorted(port["target"] for _, port in ports), [443, 8443])
         self.assertEqual(
             set(config["services"]["api"]["networks"]),
             {"default", "tools_private", "documents_private", "model_private", "web"},

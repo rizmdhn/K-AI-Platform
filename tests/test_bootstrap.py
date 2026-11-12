@@ -8,6 +8,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class BootstrapTests(unittest.TestCase):
+    def test_https_overlay_whenever_a_hostname_or_ipv4_is_set(self):
+        select = self.bootstrap.tls_overlay
+        self.assertEqual(select({}), "")
+        for domain in ("kai.example.co.id", "13.212.45.67"):
+            self.assertEqual(select({"KAI_DOMAIN": domain}), "-f deploy/docker-compose.tls.yml")
+        for bad in ("https://kai.example.co.id", "kai.example.co.id/x", "13.212.45.67:443", "a b"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                select({"KAI_DOMAIN": bad})
+
     def test_vertex_overlay_only_with_an_absolute_service_account_path(self):
         select = self.bootstrap.vertex_overlay
         self.assertEqual(select({}), "")

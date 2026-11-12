@@ -79,6 +79,13 @@ API_UID = 1000  # LibreChat api container user (node)
 EXPRESS = "Vertex AI"  # librechat.yaml custom endpoint: Vertex express API key through vertex-proxy
 
 
+def egress_targets(env):
+    """Hosts the server must reach; Ollama Cloud only while it is the chat provider (not on Vertex)."""
+    if value(env.get("KAI_AGENT_PROVIDER", "")) in ("google", EXPRESS):
+        return {name: url for name, url in EGRESS.items() if not name.startswith("Ollama")}
+    return EGRESS
+
+
 def vertex_express_checks(env):
     """Express-key route: settings only (the key itself is proven by the first chat)."""
     if value(env.get("KAI_AGENT_PROVIDER", "")) != EXPRESS:
@@ -178,10 +185,10 @@ def main():
         with socket.socket() as s:
             busy = s.connect_ex(("127.0.0.1", port)) == 0
         rows.append(("WARN" if busy else "PASS", f"port {port}", "in use (kAI already running?)" if busy else "free"))
-    for name, url in EGRESS.items():
+    path = ROOT / ".env"
+    for name, url in egress_targets(settings(path.read_text()) if path.exists() else {}).items():
         error = reachable(url)
         rows.append(("FAIL" if error else "PASS", f"egress {name}", error or "reachable"))
-    path = ROOT / ".env"
     if not path.exists():
         rows.append(("FAIL", ".env", "missing; cp .env.example .env && make setup"))
     else:

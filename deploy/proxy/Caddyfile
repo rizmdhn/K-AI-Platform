@@ -12,3 +12,8 @@ https://{$KAI_DOMAIN}:443 {
 		flush_interval -1
 	}
 }
+
+# Admin Panel on its own port, so it can be firewalled to admin IPs separately from chat.
+https://{$KAI_DOMAIN}:8443 {
+	reverse_proxy admin-panel:3000
+}

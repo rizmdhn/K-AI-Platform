@@ -65,6 +65,11 @@ class VertexPreflightTests(unittest.TestCase):
         self.assertEqual(self.rows({**env, "KAI_GENERAL_AGENT_MODEL": ""})["Vertex settings"][0], "FAIL")
         self.assertEqual(self.rows({"KAI_VERTEX_KEY_FILE": "/etc/kai/v.json"})["inference provider"][0], "FAIL")
 
+    def test_ollama_egress_only_required_while_ollama_is_the_provider(self):
+        self.assertIn("Ollama Cloud (chat model)", preflight.egress_targets({}))
+        for provider in ("Vertex AI", "google"):
+            self.assertNotIn("Ollama Cloud (chat model)", preflight.egress_targets({"KAI_AGENT_PROVIDER": provider}))
+
     def test_vertex_express_route_needs_key_project_model_and_mcp(self):
         rows = preflight.vertex_express_checks({"KAI_AGENT_PROVIDER": "Vertex AI", "KAI_MCP_ENABLED": "true"})
         self.assertEqual(rows[0][0], "FAIL")

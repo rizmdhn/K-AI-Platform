@@ -9,6 +9,7 @@ import tempfile
 import fcntl
 from contextlib import contextmanager
 import argparse
+import ipaddress
 
 
 @contextmanager
@@ -114,6 +115,21 @@ def vertex_overlay(fields):
     if not Path(source).is_absolute() or any(ord(c) < 32 or c in ' :' for c in source):
         raise ValueError('KAI_VERTEX_KEY_FILE must be an absolute host path without spaces or colons.')
     return ' -f deploy/docker-compose.vertex.yml'
+
+
+def tls_overlay(fields):
+    """HTTPS entrypoint (Caddy on 443) whenever KAI_DOMAIN is set: a bare hostname, or an IPv4 address
+    (Caddy then serves its own certificate; browsers warn until a real domain is used)."""
+    domain = value(fields.get('KAI_DOMAIN', ''))
+    if not domain:
+        return ''
+    try:
+        ipaddress.IPv4Address(domain)
+    except ValueError:
+        if len(domain) > 253 or any(not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', label)
+                                    for label in domain.split('.')):
+            raise ValueError('KAI_DOMAIN must be a bare hostname or IPv4 address.') from None
+    return '-f deploy/docker-compose.tls.yml'
 
 
 def validate_mcp_target(host, port):
@@ -330,10 +346,14 @@ def _initialize(runtime: Path) -> bool:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mcp-overlay', action='store_true')
+    parser.add_argument('--tls-overlay', action='store_true')
     args = parser.parse_args()
     destination = Path(__file__).resolve().parents[1]
     try:
-        if args.mcp_overlay:
+        if args.tls_overlay:
+            fields = settings((destination / '.env').read_text()) if (destination / '.env').exists() else {}
+            print(tls_overlay(fields))
+        elif args.mcp_overlay:
             fields = settings((destination / '.env').read_text()) if (destination / '.env').exists() else {}
             print((mcp_overlays(fields) + vertex_overlay(fields)).strip())
         else:

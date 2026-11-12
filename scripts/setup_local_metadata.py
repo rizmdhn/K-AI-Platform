@@ -171,7 +171,8 @@ class LocalMetadata:
         self.run(['docker', 'image', 'inspect', 'kai-clickhouse-mcp:0.7.0', '--format', '{{.Id}}'])
 
     def start_command(self):
-        return self.compose + ['up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '120', 'kai-metadata']
+        # missing: a fresh server fetches the digest-pinned postgres image once; nothing else is ever pulled.
+        return self.compose + ['up', '-d', '--no-build', '--pull', 'missing', '--wait', '--wait-timeout', '120', 'kai-metadata']
 
     def psql(self, suffix):
         return self.compose + ['exec', '-T', 'kai-metadata', 'sh', '-ec',

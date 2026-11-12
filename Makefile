@@ -2,7 +2,12 @@ MCP_OVERLAY := $(shell python3 scripts/bootstrap.py --mcp-overlay || echo __KAI_
 ifneq ($(filter __KAI_OVERLAY_ERROR__,$(MCP_OVERLAY)),)
 $(error Konfigurasi overlay ditolak; periksa .env secara privat sebelum melanjutkan)
 endif
-COMPOSE = docker compose --project-name kai --project-directory deploy --env-file .env -f deploy/upstream/docker-compose.yml -f deploy/docker-compose.override.yml $(MCP_OVERLAY)
+# HTTPS entrypoint (Caddy, port 443) whenever KAI_DOMAIN is set, so every target keeps it.
+TLS_OVERLAY := $(shell python3 scripts/bootstrap.py --tls-overlay || echo __KAI_OVERLAY_ERROR__)
+ifneq ($(filter __KAI_OVERLAY_ERROR__,$(TLS_OVERLAY)),)
+$(error KAI_DOMAIN harus hostname atau alamat IPv4, tanpa https:// atau path)
+endif
+COMPOSE = docker compose --project-name kai --project-directory deploy --env-file .env -f deploy/upstream/docker-compose.yml -f deploy/docker-compose.override.yml $(MCP_OVERLAY) $(TLS_OVERLAY)
 
 .PHONY: setup preflight check up down logs ps test mcp-test mcp-image admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup warehouse-local-check warehouse-local-setup evals smoke-config browser-warehouse-test worker-test rag-acl-test openmetadata-check
 

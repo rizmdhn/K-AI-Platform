@@ -8,8 +8,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def render_tls(domain="chat.example.com", all_profiles=False):
-    environment = dict(os.environ, PORT="3080")
+def render_tls(domain="chat.example.com", all_profiles=False, port_env=None):
+    environment = dict(os.environ, PORT="3080", **(port_env or {}))
     environment.pop("KAI_DOMAIN", None)
     if domain is not None:
         environment["KAI_DOMAIN"] = domain
@@ -52,20 +52,34 @@ class TLSComposeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
-    def test_only_proxy_publishes_443_even_with_optional_profiles(self):
+    def test_only_proxy_publishes_chat_443_and_admin_8443_even_with_optional_profiles(self):
         services = self.deployment(all_profiles=True)["services"]
         published = [
             (name, port)
             for name, service in services.items()
             for port in service.get("ports", [])
+            if port.get("host_ip") != "127.0.0.1"
         ]
-        self.assertEqual(len(published), 1)
-        name, port = published[0]
-        self.assertEqual(name, "reverse-proxy")
-        self.assertEqual(port["host_ip"], "0.0.0.0")
-        self.assertEqual(str(port["published"]), "443")
-        self.assertEqual(port["target"], 443)
-        self.assertEqual(port["protocol"], "tcp")
+        # Only the Admin Panel keeps a loopback port, for SSH tunnels.
+        loopback = {name for name, service in services.items()
+                    for port in service.get("ports", []) if port.get("host_ip") == "127.0.0.1"}
+        self.assertEqual(loopback, {"admin-panel"})
+        self.assertEqual({name for name, _ in published}, {"reverse-proxy"})
+        self.assertEqual(sorted((str(p["published"]), p["target"], p["host_ip"], p["protocol"]) for _, p in published),
+                         [("443", 443, "0.0.0.0", "tcp"), ("8443", 8443, "0.0.0.0", "tcp")])
+
+    def test_admin_panel_behind_proxy_uses_secure_session_and_https_url(self):
+        services = self.deployment(all_profiles=True)["services"]
+        self.assertEqual(services["admin-panel"]["environment"]["SESSION_COOKIE_SECURE"], "true")
+        self.assertIn("web", services["admin-panel"]["networks"])
+        self.assertEqual(services["api"]["environment"]["ADMIN_PANEL_URL"], "https://chat.example.com:8443")
+
+    def test_admin_port_can_move_when_8443_is_taken(self):
+        result = render_tls(port_env={"KAI_ADMIN_HTTPS_PORT": "9443"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        services = json.loads(result.stdout)["services"]
+        self.assertIn("9443", {str(p["published"]) for p in services["reverse-proxy"]["ports"]})
+        self.assertEqual(services["api"]["environment"]["ADMIN_PANEL_URL"], "https://chat.example.com:9443")
 
     def test_application_uses_https_origins_and_secure_cookies(self):
         environment = self.deployment()["services"]["api"]["environment"]

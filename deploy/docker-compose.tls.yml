@@ -7,6 +7,7 @@ services:
       DOMAIN_SERVER: https://${KAI_DOMAIN:?set_KAI_DOMAIN_to_the_approved_hostname}
       SESSION_COOKIE_SECURE: "true"
       TRUST_PROXY: "1"
+      ADMIN_PANEL_URL: https://${KAI_DOMAIN}:${KAI_ADMIN_HTTPS_PORT:-8443}
       # The development signup policy must not become public before D01 is resolved.
       ALLOW_REGISTRATION: "false"
       ALLOW_SOCIAL_REGISTRATION: "false"
@@ -24,6 +25,8 @@ services:
     restart: unless-stopped
     ports:
       - "0.0.0.0:443:443/tcp"
+      # Admin Panel (KAI_ADMIN_HTTPS_PORT, default 8443). Restrict it to admin IPs in the firewall / security group.
+      - "0.0.0.0:${KAI_ADMIN_HTTPS_PORT:-8443}:8443/tcp"
     environment:
       KAI_DOMAIN: ${KAI_DOMAIN:?set_KAI_DOMAIN_to_the_approved_hostname}
       KAI_APP_PORT: ${PORT:-3080}
@@ -37,8 +40,13 @@ services:
     networks:
       - web
 
+  # Served by the proxy on https://KAI_DOMAIN:8443; its loopback port (127.0.0.1:3081) stays for SSH tunnels.
   admin-panel:
-    ports: !override []
+    environment:
+      SESSION_COOKIE_SECURE: "true"
+    networks:
+      - default
+      - web
 
 networks:
   web:

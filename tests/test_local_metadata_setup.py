@@ -95,7 +95,7 @@ class LocalMetadataSetupTests(unittest.TestCase):
     def test_commands_keep_password_out_of_argv_and_restart_only_metadata(self):
         helper = self.setup.LocalMetadata(ROOT, {})
         self.assertEqual(helper.compose[-2:], ['-f', 'deploy/docker-compose.metadata-local.yml'])
-        self.assertEqual(helper.start_command()[-9:], ['up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '120', 'kai-metadata'])
+        self.assertEqual(helper.start_command()[-9:], ['up', '-d', '--no-build', '--pull', 'missing', '--wait', '--wait-timeout', '120', 'kai-metadata'])
         command = helper.password_command('kai_binding_runtime')
         self.assertIn('\\password kai_binding_runtime', command[-1])
         self.assertNotIn('a' * 64, ' '.join(command))
