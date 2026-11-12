@@ -2,6 +2,8 @@
 	admin off
 	auto_https disable_redirects
 	skip_install_trust
+	# Clients send no SNI when KAI_DOMAIN is an IP; without this, the handshake finds no certificate.
+	default_sni {$KAI_DOMAIN}
 	servers {
 		protocols h1 h2
 	}
