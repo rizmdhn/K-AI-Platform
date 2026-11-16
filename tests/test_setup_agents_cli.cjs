@@ -81,3 +81,26 @@ test('warehouse ACL validation rejects role, public, inherited and unregistered 
   await f.deps.validateWarehouseAccess(agent, actor, { registered: true });
   assert.deepEqual(f.calls, []);
 });
+test('--transfer needs --apply and --owner; it moves authorship of registered agents and revokes the old owner', async () => {
+  for (const args of [['--transfer'], ['--apply', '--transfer'], ['--check', '--transfer', '--owner', owner._id], ['--apply', '--transfer', '--transfer', '--owner', owner._id]]) assert.throws(() => parseArgs(args));
+  assert.deepEqual(parseArgs(['--apply', '--transfer', '--owner', owner._id]), { apply: true, owner: owner._id, transfer: true });
+  const { transferAgents } = require('../services/platform-api/setup_agents.cjs');
+  const old = 'aaaaaaaaaaaaaaaaaaaaaaaa', updates = [], revokes = [], writes = [];
+  const agents = { agent_general: { _id: 'g', id: 'agent_general', author: old }, agent_ch: { _id: 'c', id: 'agent_ch', author: old }, agent_mine: { _id: 'm', id: 'agent_mine', author: owner._id } };
+  const runtime = {
+    mongoose: { Types: { ObjectId: class { constructor(v) { this.v = v; } toString() { return this.v; } } }, model: () => ({ updateOne: async (q, u) => { updates.push([q._id, String(u.$set.author)]); return { modifiedCount: 1 }; } }) },
+    permissions: { bulkUpdateResourcePermissions: async (data) => { revokes.push([data.resourceId, data.resourceType, data.revokedPrincipals[0].id]); return { errors: [] }; } },
+    native: { ResourceType: { AGENT: 'agent', REMOTE_AGENT: 'remote' }, PrincipalType: { USER: 'user' } },
+  };
+  const deps = { getAgent: async (id) => agents[id], beforeWrite: async () => writes.push(1) };
+  const list = [{ name: 'kai-assistant', preset: { endpoint: 'agents', agent_id: 'agent_general' } }, { name: 'kai-ch', preset: { endpoint: 'agents', agent_id: 'agent_ch' } }, { name: 'other', preset: { endpoint: 'agents', agent_id: 'agent_mine' } }];
+  const moved = await transferAgents(list, { id: owner._id }, deps, runtime);
+  assert.deepEqual(moved.map(m => m.id), ['agent_general', 'agent_ch']);
+  assert.deepEqual(updates, [['g', owner._id], ['c', owner._id]]);
+  assert.deepEqual(revokes, [['g', 'agent', old], ['g', 'remote', old], ['c', 'agent', old], ['c', 'remote', old]]);
+  assert.ok(writes.length >= 2);
+  agents.agent_general.author = owner._id; agents.agent_ch.author = owner._id; updates.length = 0;
+  assert.deepEqual(await transferAgents(list, { id: owner._id }, deps, runtime), []);
+  assert.deepEqual(updates, []);
+  await assert.rejects(transferAgents([{ name: 'kai-ch', preset: { endpoint: 'agents', agent_id: 'missing' } }], { id: owner._id }, deps, runtime));
+});

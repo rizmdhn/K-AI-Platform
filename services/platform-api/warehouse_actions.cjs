@@ -2,7 +2,7 @@ const { AccountError } = require('./accounts.cjs');
 function createWarehouseActions({accounts,warehouse,agents}) {
   const empty=req=>({...req,headers:req.headers,body:{}});
   async function cleanup(req) {try{return await agents.revokeManaged(empty(req));}catch(error){return{cleanup_complete:false,reason:`error ${error?.status??''}`};}}
-  const OWNER='Akun ini pemilik chatbot K-AI. Pindahkan kepemilikan ke ADMIN lain dulu (make agents-setup AGENT_OWNER_ID=<ID ADMIN lain>), lalu ulangi.';
+  const OWNER='Akun ini pemilik chatbot K-AI. Pindahkan kepemilikan ke ADMIN lain dulu (make agents-transfer AGENT_OWNER_ID=<ID ADMIN lain>), lalu ulangi.';
   // Lookup failure never blocks a disable: losing the chatbot is better than keeping a compromised account.
   const ownsAgent=req=>agents.ownsManaged?agents.ownsManaged(empty(req)).catch(()=>false):false;
   async function save(req) {

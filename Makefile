@@ -9,7 +9,7 @@ $(error KAI_DOMAIN harus hostname atau alamat IPv4, tanpa https:// atau path)
 endif
 COMPOSE = docker compose --project-name kai --project-directory deploy --env-file .env -f deploy/upstream/docker-compose.yml -f deploy/docker-compose.override.yml $(MCP_OVERLAY) $(TLS_OVERLAY)
 
-.PHONY: setup preflight check up down logs ps migrate test mcp-test mcp-image admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup warehouse-local-check warehouse-local-setup evals smoke-config browser-warehouse-test worker-test rag-acl-test openmetadata-check
+.PHONY: setup preflight check up down logs ps migrate test mcp-test mcp-image admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup agents-transfer warehouse-local-check warehouse-local-setup evals smoke-config browser-warehouse-test worker-test rag-acl-test openmetadata-check
 
 setup:
 	python3 scripts/bootstrap.py
@@ -77,6 +77,14 @@ binding-check:
 # Operator commands: metadata/ACL/config only; never calls a model or CH tool.
 agents-check:
 	$(COMPOSE) exec -T api node /app/kai-platform/setup_agents.cjs --check $(if $(AGENT_OWNER_ID),--owner "$(AGENT_OWNER_ID)",)
+
+# Hand the managed chat agents (same IDs, user grants kept) to another active ADMIN, e.g. when the owner was disabled.
+agents-transfer: check
+	@test -n "$(AGENT_OWNER_ID)" || (echo 'Pakai: make agents-transfer AGENT_OWNER_ID=<ID ADMIN aktif> (ID ada di detail user Admin Panel).' >&2; exit 1)
+	$(MAKE) backup
+	$(COMPOSE) exec -T api node /app/kai-platform/setup_agents.cjs --apply --transfer --owner "$(AGENT_OWNER_ID)"
+	$(COMPOSE) restart api
+	$(COMPOSE) up -d --no-build --pull never --wait --wait-timeout 120 --no-deps api
 
 agents-setup:
 	$(COMPOSE) exec -T api node /app/kai-platform/setup_agents.cjs --apply $(if $(AGENT_OWNER_ID),--owner "$(AGENT_OWNER_ID)",)

@@ -5,14 +5,17 @@ const BACKUP = '/tmp/kai-agent-model-specs-before.json';
 const fail = () => new Error('Managed agent setup failed. Check owner, capabilities and native configuration.');
 const active = user => user && !user.deleted && !user.deletedAt && !user.disabled && user.active !== false && ['active', 'existing'].includes(user.kaiAccount?.status ?? 'existing');
 function parseArgs(args) {
-  let apply = false, mode, owner;
+  let apply = false, mode, owner, transfer = false;
   for (let i = 0; i < args.length; i++) {
     if (['--check', '--apply'].includes(args[i]) && !mode) {
       mode = args[i]; apply = mode === '--apply';
-    } else if (args[i] === '--owner' && owner === undefined && /^[a-f0-9]{24}$/.test(args[i + 1] ?? '')) owner = args[++i];
+    } else if (args[i] === '--transfer' && !transfer) transfer = true;
+    else if (args[i] === '--owner' && owner === undefined && /^[a-f0-9]{24}$/.test(args[i + 1] ?? '')) owner = args[++i];
     else throw fail();
   }
-  return { apply, owner };
+  // --transfer hands the registered managed agents to --owner; it always writes, so it needs --apply.
+  if (transfer && (!apply || !owner)) throw fail();
+  return { apply, owner, ...(transfer ? { transfer } : {}) };
 }
 const summarize = agent => ({ id: agent.id, name: agent.name, provider: agent.provider, model: agent.model, tools: agent.tools ?? [] });
 function createAdapter({ db, mongoose, permissions, capabilities, configService, api, native, nanoid, brand, beforeWrite }) {
@@ -37,6 +40,7 @@ function createAdapter({ db, mongoose, permissions, capabilities, configService,
     if (!await permissions.grantPermission({ principalType, principalId, resourceType, resourceId: agent._id, accessRoleId, grantedBy: actor.id })) throw fail();
   }
   return {
+    beforeWrite,
     findUser: id => db.findUser({ _id: id }), hasCapability: capabilities.hasCapability, getConfig,
     getAgent: id => typeof id === 'string' ? db.getAgent({ id }) : null,
     findCandidates: (name, author, tenantId) => mongoose.model('Agent').find({ name, author, tenantId: tenantId ?? null }).limit(2).lean(),
@@ -110,6 +114,25 @@ function createAdapter({ db, mongoose, permissions, capabilities, configService,
     target: { provider: process.env.KAI_AGENT_PROVIDER, generalModel: process.env.KAI_GENERAL_AGENT_MODEL, chModel: process.env.KAI_CH_AGENT_MODEL },
   };
 }
+// Same agent IDs (users keep their chatbot grants); the old owner loses authorship and its grants on them.
+async function transferAgents(list, actor, deps, { mongoose, permissions, native }) {
+  const { ResourceType, PrincipalType } = native, transferred = [];
+  for (const spec of list.filter(spec => ['kai-assistant', 'kai-ch'].includes(spec?.name) && spec?.preset?.endpoint === 'agents')) {
+    const agent = await deps.getAgent(spec.preset.agent_id);
+    if (!agent?._id) throw fail();
+    const previous = String(agent.author);
+    if (previous === actor.id) continue;
+    await deps.beforeWrite();
+    const moved = await mongoose.model('Agent').updateOne({ _id: agent._id, author: agent.author }, { $set: { author: new mongoose.Types.ObjectId(actor.id) } });
+    if (moved?.modifiedCount !== 1) throw fail();
+    for (const resourceType of [ResourceType.AGENT, ResourceType.REMOTE_AGENT]) {
+      const result = await permissions.bulkUpdateResourcePermissions({ resourceType, resourceId: agent._id, grantedBy: actor.id, updatedPrincipals: [], revokedPrincipals: [{ type: PrincipalType.USER, id: previous }] });
+      if (!result || (Array.isArray(result.errors) && result.errors.length)) throw fail();
+    }
+    transferred.push({ id: agent.id, from: previous, to: actor.id });
+  }
+  return transferred;
+}
 async function run(options, runtime) {
   const { mongoose, capabilities, tenantStorage } = runtime;
   let owner;
@@ -125,6 +148,7 @@ async function run(options, runtime) {
   const execute = async () => {
     for (const cap of ['access:admin', 'manage:agents', 'manage:configs']) if (!await capabilities.hasCapability(actor, cap)) throw fail();
     let changed = false, original;
+    const transferred = [];
     const deps = createAdapter({ ...runtime, beforeWrite: async () => {
       if (!options.apply) throw fail();
       if (!changed) {
@@ -143,9 +167,10 @@ async function run(options, runtime) {
     if (!Array.isArray(original)) throw fail();
     const existingBase = await runtime.db.findConfigByPrincipal('role', '__base__', { includeInactive: true });
     if (existingBase?.active === false) throw fail();
+    if (options.transfer) transferred.push(...await transferAgents(original, actor, deps, runtime));
     if (options.apply) {
       const result = await require('./managed_agent_setup.cjs').provisionManagedAgents(actor.id, deps);
-      return { changed, agents: [summarize(result.general), summarize(result.warehouse)] };
+      return { changed, ...(options.transfer ? { transferred } : {}), agents: [summarize(result.general), summarize(result.warehouse)] };
     }
     const agents = [];
     for (const spec of original.filter(spec => ['kai-assistant', 'kai-ch'].includes(spec.name))) {
@@ -177,4 +202,4 @@ if (require.main === module) {
   console.log = console.info = console.warn = console.error = () => {};
   main(process.argv.slice(2)).then(() => process.exit(0), () => { process.stderr.write(`${fail().message}\n`); process.exit(1); });
 }
-module.exports = { parseArgs, createAdapter, run };
+module.exports = { parseArgs, createAdapter, run, transferAgents };
