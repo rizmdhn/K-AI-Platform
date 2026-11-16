@@ -15,6 +15,10 @@ function createWarehouseActions({accounts,warehouse,agents}) {
     return warehouse.credentials({...req,headers:req.headers,body:{password:data.password}});
   }
   async function revoke(req) {
+    // Manual revoke fences the account permanently; refuse it while no credential was ever saved (failed first binding).
+    // Account disable calls warehouse.revoke directly and keeps its permanent revocation.
+    const current=await warehouse.status(empty(req));
+    if(!current.credentials_saved&&!['active','revoked'].includes(current.state))throw new AccountError('Belum ada akses ClickHouse yang tersimpan. Isi username dan password yang benar, lalu simpan.',409);
     let result;
     try { result=await warehouse.revoke(req); }
     catch(error) { await cleanup(req);throw error; }

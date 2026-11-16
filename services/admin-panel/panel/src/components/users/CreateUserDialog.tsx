@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type * as t from '@/types';
 import { FormDialog } from '@/components/shared';
 import { provisionUserFn } from '@/server/kaiAccounts';
-import { ActivationLink, inputClass } from './AccountFields';
+import { ActivationLink, errorText, inputClass } from './AccountFields';
 export function CreateUserDialog({ open, onClose }: t.CreateUserDialogProps) {
   const { user } = useRouteContext({ from: '/_app' });
   const queryClient = useQueryClient();
@@ -12,7 +12,7 @@ export function CreateUserDialog({ open, onClose }: t.CreateUserDialogProps) {
   const [role, setRole] = useState<'USER' | 'ADMIN'>('USER');
   const mutation = useMutation({ gcTime: 0, mutationFn: () => provisionUserFn({ data: { name, email, role, warehouse: null } }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }) });
   const close = () => { if (mutation.isPending) return; mutation.reset(); setName(''); setEmail(''); setRole('USER'); onClose(); };
-  return <FormDialog open={open} title={mutation.isSuccess ? 'Akun berhasil dibuat' : 'Tambah pengguna'} submitLabel={mutation.isSuccess ? 'Selesai' : 'Buat akun platform'} saving={mutation.isPending} submitDisabled={!mutation.isSuccess && (!name.trim() || !email.trim())} error={mutation.error?.message} onClose={close} onSubmit={() => { if (mutation.isSuccess) close(); else if (!mutation.isPending) mutation.mutate(); }}>
+  return <FormDialog open={open} title={mutation.isSuccess ? 'Akun berhasil dibuat' : 'Tambah pengguna'} submitLabel={mutation.isSuccess ? 'Selesai' : 'Buat akun platform'} saving={mutation.isPending} submitDisabled={!mutation.isSuccess && (!name.trim() || !email.trim())} error={mutation.error ? errorText(mutation.error, 'Akun gagal dibuat. Periksa koneksi, lalu coba lagi.') : undefined} onClose={close} onSubmit={() => { if (mutation.isSuccess) close(); else if (!mutation.isPending) mutation.mutate(); }}>
     {mutation.data ? <>
       <ActivationLink invitation={mutation.data} />
       <p className="text-sm">Pengguna perlu mengaktifkan akun melalui tautan di atas. Akses agent dikelola terpisah oleh administrator.</p>

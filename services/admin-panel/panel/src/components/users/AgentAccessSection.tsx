@@ -4,6 +4,7 @@ import { useCapabilities } from '@/hooks';
 import { SystemCapabilities } from '@/constants';
 import { accountSetupFn } from '@/server/kaiAccounts';
 import { agentAccessFn, assignAgentFn } from '@/server/kaiAgents';
+import { errorText } from './AccountFields';
 export function AgentAccessSection({ userId }: { userId: string }) {
   const { hasCapability } = useCapabilities();
   const client = useQueryClient();
@@ -26,6 +27,6 @@ export function AgentAccessSection({ userId }: { userId: string }) {
       {status.inherited_access && <p className="text-sm">Akses juga berasal dari grup, role, atau kepemilikan. Menghapus penetapan langsung tidak mencabut akses tersebut.</p>}
       {status.direct_assignment && !status.can_remove_direct && <p className="text-sm">Izin ini tidak dapat dihapus dari panel ini. Hubungi pengelola.</p>}
     </>}
-    {mutation.isError && <p role="alert">{mutation.error.message}</p>}
+    {mutation.isError && <p role="alert">{errorText(mutation.error, 'Akses chatbot CH gagal diubah. Coba lagi.')}</p>}
   </section>;
 }

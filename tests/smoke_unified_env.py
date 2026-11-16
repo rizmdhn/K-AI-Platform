@@ -297,7 +297,7 @@ def main():
                 },
                 form=True,
             )
-            assert status == 200 and b"Account activated" in page
+            assert status == 200 and "Akun berhasil diaktifkan".encode() in page
             PHASE = "user login and denials"
             status, login = request(
                 base, "/api/auth/login", {"email": email, "password": password}

@@ -6,7 +6,7 @@ import { SystemCapabilities } from '@/constants';
 import { ConfirmDialog } from '@/components/access';
 import { accountSetupFn, warehouseAccessFn, saveWarehouseCredentialsFn, revokeWarehouseFn } from '@/server/kaiAccounts';
 import type { WarehouseAccess } from '@/server/kaiAccounts';
-import { inputClass } from './AccountFields';
+import { errorText, inputClass } from './AccountFields';
 export function WarehouseAccessSection({ userId }: { userId: string }) {
   const { hasCapability } = useCapabilities();
   const canManage = hasCapability(SystemCapabilities.MANAGE_USERS);
@@ -25,9 +25,10 @@ export function WarehouseAccessSection({ userId }: { userId: string }) {
     try {
       const result = await action();
       client.setQueryData(key, result);
-      if (mounted.current) { setSuccess(saving && result.state === 'active' && result.credentials_saved && result.reference_matches); setCleanupIncomplete(result.cleanup_complete === false); setConfirm(false); }
+      const connected = result.state === 'active' && result.credentials_saved && result.reference_matches;
+      if (mounted.current) { setSuccess(saving && connected); setError(saving && !connected ? 'Akses ClickHouse belum aktif. Periksa username dan password, lalu coba lagi.' : ''); setCleanupIncomplete(result.cleanup_complete === false); setConfirm(false); }
     } catch (cause) {
-      if (mounted.current) setError(cause instanceof Error ? cause.message : 'Perubahan akses ClickHouse gagal. Coba lagi.');
+      if (mounted.current) setError(errorText(cause, 'Perubahan akses ClickHouse gagal. Coba lagi.'));
     } finally {
       if (mounted.current) { setPassword(''); setBusy(false); }
       await Promise.all([client.invalidateQueries({ queryKey: key }), client.invalidateQueries({ queryKey: ['kaiAccount', userId] }), client.invalidateQueries({ queryKey: ['kaiAgents', userId] })]);
@@ -58,7 +59,7 @@ export function WarehouseAccessSection({ userId }: { userId: string }) {
       {canManage && <label className="flex flex-col gap-1 text-sm">Password ClickHouse<input className={inputClass} type="password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} disabled={busy || !canSave} required maxLength={4096} /></label>}
       {canManage && <div className="flex flex-wrap gap-2">
         <Button type="primary" htmlType="submit" label={lockedIdentity ? 'Ganti password' : 'Simpan dan uji koneksi'} disabled={busy || !canSave || !password || !username.trim()} />
-        {!['reference_required', 'not_prepared'].includes(status.state) && <Button type="danger" htmlType="button" label={status.state === 'revoked' ? 'Ulangi pencabutan akses' : 'Cabut akses'} disabled={busy} onClick={() => { setPassword(''); setConfirm(true); }} />}
+        {(status.credentials_saved || status.state === 'active' || status.state === 'revoked') && <Button type="danger" htmlType="button" label={status.state === 'revoked' ? 'Ulangi pencabutan akses' : 'Cabut akses'} disabled={busy} onClick={() => { setPassword(''); setConfirm(true); }} />}
       </div>}
     </form>}
     {success && !disabledAccount && <p role="status">Berhasil terhubung</p>}

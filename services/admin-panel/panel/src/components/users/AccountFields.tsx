@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { Button } from '@clickhouse/click-ui';
 import type { Invitation } from '@/server/kaiAccounts';
+/** Error text for the account sections: never empty, and browser network errors become plain Indonesian. */
+export function errorText(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : '';
+  return !message || /failed to fetch|networkerror|load failed/i.test(message) ? fallback : message;
+}
 export const inputClass = 'w-full rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default)';
 export function ActivationLink({ invitation }: { invitation: Invitation }) {
   const [copied, setCopied] = useState(false);

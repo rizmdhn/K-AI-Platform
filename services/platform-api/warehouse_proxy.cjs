@@ -1,6 +1,6 @@
 const { AccountError } = require("./accounts.cjs");
 const unavailable = () =>
-  new AccountError("Warehouse access is unavailable.", 503);
+  new AccountError("Layanan akses data ClickHouse sedang tidak tersedia. Coba lagi beberapa saat lagi.", 503);
 function fields(body, allowed) {
   if (
     !body ||
@@ -8,7 +8,7 @@ function fields(body, allowed) {
     Array.isArray(body) ||
     Object.keys(body).some((k) => !allowed.includes(k))
   )
-    throw new AccountError("Invalid warehouse request.");
+    throw new AccountError("Permintaan akses ClickHouse tidak valid. Muat ulang halaman, lalu coba lagi.");
 }
 function statusDto(value) {
   if (
@@ -62,13 +62,13 @@ function createWarehouseProxy({ accounts, fetchImpl = fetch }) {
         Buffer.byteLength(req.body.password) > 4096 ||
         req.body.password.includes("\0"))
     )
-      throw new AccountError("Invalid warehouse password.");
+      throw new AccountError("Password ClickHouse wajib diisi (maksimal 4096 byte).");
     // Reuse the native, fresh capability/tenant check without forwarding secret request fields to context.
     if (action === "revoke") await accounts.warehouseRevocationContext({ ...req, headers:req.headers, body:{} });
     else await accounts.warehouseContext({ ...req, headers:req.headers, body: {} }, write);
     const bearer = req.headers?.authorization;
     if (typeof bearer !== "string" || !/^Bearer [^\s]+$/.test(bearer))
-      throw new AccountError("Unauthorized.", 401);
+      throw new AccountError("Sesi Anda berakhir. Silakan login ulang.", 401);
     const suffix = ["status", "revoke"].includes(action) ? "" : `/${action}`;
     const method =
       !write ? "GET" : action === "revoke" ? "DELETE" : "POST";

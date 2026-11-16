@@ -11,9 +11,14 @@ export interface Invitation { activationUrl: string; expiresAt: string }
 const warehouse = z.object({ service: z.string().min(1).max(253), username: z.string().min(1).max(1024), confirmed: z.literal(true) }).strict().nullable();
 const id = z.string().regex(/^[a-f0-9]{24}$/);
 async function call<T>(url: string, capability: string, method = 'GET', body?: unknown): Promise<T> {
-  await requireCapability(capability);
-  const response = await apiFetch(url, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  if (!response.ok) await extractApiError(response, 'Pengaturan akun tidak tersedia');
+  try { await requireCapability(capability); } catch (error) {
+    throw new Error(error instanceof Error && error.message.startsWith('Insufficient permissions') ? 'Anda tidak punya izin untuk tindakan ini.' : 'Sesi Anda berakhir. Silakan login ulang.');
+  }
+  let response: Response;
+  try { response = await apiFetch(url, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); } catch {
+    throw new Error('Layanan platform tidak bisa dihubungi atau sesi berakhir. Muat ulang halaman, lalu coba lagi.');
+  }
+  if (!response.ok) await extractApiError(response, 'Layanan akun sedang tidak tersedia');
   return response.json() as Promise<T>;
 }
 export const provisionUserFn = createServerFn({ method: 'POST' })

@@ -5,7 +5,7 @@ import { useCapabilities } from '@/hooks';
 import { SystemCapabilities } from '@/constants';
 import { ConfirmDialog } from '@/components/access';
 import { accountSetupFn, disableAccountFn, reissueActivationFn } from '@/server/kaiAccounts';
-import { ActivationLink } from './AccountFields';
+import { ActivationLink, errorText } from './AccountFields';
 export function AccountSetupSection({ userId }: { userId: string }) {
   const { hasCapability } = useCapabilities();
   const canManage = hasCapability(SystemCapabilities.MANAGE_USERS);
@@ -31,7 +31,7 @@ export function AccountSetupSection({ userId }: { userId: string }) {
     </div>}
     {account?.status === 'pending' && reissue.data && <ActivationLink invitation={reissue.data} />}
     {(disable.data?.cleanup_complete === false || account?.warehouse_revocation_pending) && <p role="alert">Akun nonaktif. Pembersihan sesi atau akses data/chatbot belum selesai. Ulangi pembersihan akses.</p>}
-    {(reissue.error || disable.error) && <p role="alert">{disable.error?.message ?? reissue.error?.message}</p>}
+    {(reissue.error || disable.error) && <p role="alert">{disable.error ? errorText(disable.error, 'Akun gagal dinonaktifkan. Coba lagi.') : errorText(reissue.error, 'Tautan aktivasi gagal dibuat. Coba lagi.')}</p>}
     <ConfirmDialog open={confirm} title={account?.status === 'disabled' ? 'Ulangi pembersihan akses' : 'Nonaktifkan akun'} description="Pengguna akan keluar dan tidak bisa login. Akses ClickHouse dicabut permanen dan kredensial tersimpan dihapus." confirmLabel={account?.status === 'disabled' ? 'Ulangi pembersihan akses' : 'Nonaktifkan akun'} saving={disable.isPending} onConfirm={() => disable.mutate()} onCancel={() => setConfirm(false)} />
   </section>;
 }

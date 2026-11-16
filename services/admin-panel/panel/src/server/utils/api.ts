@@ -51,8 +51,8 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
 export async function extractApiError(response: Response, fallback: string): Promise<never> {
   const body = await response.json().catch(() => ({}));
   const message =
-    (body as { error?: string }).error ??
-    (body as { message?: string }).message ??
-    `${fallback}: ${response.status}`;
+    (body as { error?: string }).error ||
+    (body as { message?: string }).message ||
+    `${fallback} (HTTP ${response.status}). Coba lagi beberapa saat lagi.`;
   throw new Error(message);
 }

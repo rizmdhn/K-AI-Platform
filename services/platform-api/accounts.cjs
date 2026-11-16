@@ -13,7 +13,7 @@ function strict(value, keys) {
     Array.isArray(value) ||
     Object.keys(value).some((k) => !keys.includes(k))
   )
-    throw new AccountError("Invalid account fields.");
+    throw new AccountError("Data akun tidak valid. Muat ulang halaman, lalu coba lagi.");
 }
 function text(value, max) {
   if (
@@ -23,7 +23,7 @@ function text(value, max) {
     Buffer.byteLength(value) > max ||
     /[\x00-\x1f\x7f]/.test(value)
   )
-    throw new AccountError("Invalid account details.");
+    throw new AccountError("Nama atau email tidak valid. Periksa kembali isian.");
   return value;
 }
 function parseReference(value) {
@@ -32,7 +32,7 @@ function parseReference(value) {
   const service = text(value.service, 253),
     username = text(value.username, 1024);
   if (value.confirmed !== true || !/^[a-zA-Z0-9][a-zA-Z0-9.-]*$/.test(service))
-    throw new AccountError("Confirm the manually created ClickHouse account.");
+    throw new AccountError("Konfirmasi akun ClickHouse yang sudah dibuat.");
   return { service: service.toLowerCase(), username };
 }
 function parseCreate(value) {
@@ -46,7 +46,7 @@ function parseCreate(value) {
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
     !["USER", "ADMIN"].includes(value.role)
   )
-    throw new AccountError("Enter a valid email and platform role.");
+    throw new AccountError("Isi email yang valid dan pilih role platform (USER atau ADMIN).");
   return {
     name,
     email,
@@ -62,9 +62,9 @@ function validatePassword(password, confirm, min = 8) {
     password.includes("\0")
   )
     throw new AccountError(
-      `Use at least ${Math.max(8, min)} characters and at most 72 bytes.`,
+      `Password minimal ${Math.max(8, min)} karakter dan maksimal 72 byte. Buka kembali tautan aktivasi, lalu coba lagi.`,
     );
-  if (password !== confirm) throw new AccountError("Passwords do not match.");
+  if (password !== confirm) throw new AccountError("Konfirmasi password tidak sama. Buka kembali tautan aktivasi, lalu coba lagi.");
   return password;
 }
 const activationHash = (token) =>
@@ -131,18 +131,18 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
       )
       .catch(() => {
         indexReady = null;
-        throw new AccountError("Account setup is unavailable.", 503);
+        throw new AccountError("Layanan akun sedang tidak tersedia. Coba lagi beberapa saat lagi.", 503);
       }));
   const id = (value) => {
     if (typeof value !== "string" || !/^[a-f0-9]{24}$/.test(value))
-      throw new AccountError("Invalid user.", 400);
+      throw new AccountError("Pengguna tidak valid. Muat ulang daftar pengguna.", 400);
     return new mongoose.Types.ObjectId(value);
   };
   const find = (query, projection) =>
     collection.findOne(query, { projection, maxTimeMS: 2000 });
   const scope = (actor) => ({ tenantId: actor.tenantId ?? null });
   async function actorFor(req, write) {
-    if (!req.user?.id && !req.user?._id) throw new AccountError("Unauthorized.", 401);
+    if (!req.user?.id && !req.user?._id) throw new AccountError("Sesi Anda berakhir. Silakan login ulang.", 401);
     const actor = await find(
       { _id: id(String(req.user.id ?? req.user._id)) },
       { role: 1, tenantId: 1, "kaiAccount.status": 1 },
@@ -151,7 +151,7 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
       !actor ||
       !["active", "existing"].includes(actor.kaiAccount?.status ?? "existing")
     )
-      throw new AccountError("Unauthorized.", 401);
+      throw new AccountError("Sesi Anda berakhir. Silakan login ulang.", 401);
     const principal = {
       id: String(actor._id),
       role: actor.role,
@@ -161,15 +161,15 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
       !(await hasCapability(principal, "access:admin")) ||
       !(await hasCapability(principal, write ? "manage:users" : "read:users"))
     )
-      throw new AccountError("Insufficient permissions.", 403);
+      throw new AccountError("Anda tidak punya izin untuk tindakan ini.", 403);
     return actor;
   }
   async function targetFor(actor, userId, write) {
     const target = await find({ _id: id(userId), ...scope(actor) });
-    if (!target) throw new AccountError("User not found.", 404);
+    if (!target) throw new AccountError("Pengguna tidak ditemukan. Muat ulang daftar pengguna.", 404);
     if (write && target.role === "ADMIN" && actor.role !== "ADMIN")
       throw new AccountError(
-        "Only a platform ADMIN can manage an ADMIN account.",
+        "Hanya ADMIN yang dapat mengelola akun ADMIN.",
         403,
       );
     return target;
@@ -185,7 +185,7 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
       input = parseCreate(req.body);
     if (input.role === "ADMIN" && actor.role !== "ADMIN")
       throw new AccountError(
-        "Only a platform ADMIN can create an ADMIN account.",
+        "Hanya ADMIN yang dapat membuat akun ADMIN.",
         403,
       );
     await ready();
@@ -240,7 +240,7 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
       target = await targetFor(actor, req.params.id, true);
     strict(req.body, ["warehouse"]);
     if (!Object.hasOwn(req.body, "warehouse"))
-      throw new AccountError("Warehouse reference is required.");
+      throw new AccountError("Akun ClickHouse wajib diisi.");
     const ref = parseReference(req.body.warehouse);
     await ready();
     const change = ref
@@ -275,7 +275,7 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
     );
     if (!result.modifiedCount)
       throw new AccountError(
-        "Only pending accounts can receive a new activation link.",
+        "Tautan aktivasi baru hanya bisa dibuat untuk akun yang belum diaktifkan.",
         409,
       );
     return invitation(req.params.id, a);
@@ -286,7 +286,7 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
       typeof body.token !== "string" ||
       !/^kai_[a-f0-9]{64}$/.test(body.token)
     )
-      throw new AccountError("Activation link is invalid or expired.");
+      throw new AccountError("Tautan aktivasi tidak valid, sudah dipakai, atau kedaluwarsa. Minta tautan baru ke administrator.");
     const password = validatePassword(
       body.password,
       body.confirm_password,
@@ -300,7 +300,7 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
       password: { $exists: false },
     };
     if (!(await find(filter, { _id: 1 })))
-      throw new AccountError("Activation link is invalid or expired.");
+      throw new AccountError("Tautan aktivasi tidak valid, sudah dipakai, atau kedaluwarsa. Minta tautan baru ke administrator.");
     const hashed = await bcrypt.hash(password, 12);
     // Token consumption and password installation are one atomic Mongo operation.
     const result = await collection.updateOne(filter, {
@@ -316,7 +316,7 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
       },
     });
     if (!result.modifiedCount)
-      throw new AccountError("Activation link is invalid or expired.");
+      throw new AccountError("Tautan aktivasi tidak valid, sudah dipakai, atau kedaluwarsa. Minta tautan baru ke administrator.");
   }
   async function gate(req, res, next) {
     let user;
@@ -330,7 +330,7 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
         .status(503)
         .json({ message: "Account verification unavailable." });
     }
-    if (!user) return res.status(401).json({ message: "Unauthorized." });
+    if (!user) return res.status(401).json({ message: "Sesi Anda berakhir. Silakan login ulang." });
     if (user.kaiAccount?.status === "disabled")
       return res.status(403).json({code:"ACCOUNT_DISABLED",message:"Akun dinonaktifkan. Hubungi administrator."});
     if (user.kaiAccount?.status === "pending")
@@ -385,7 +385,7 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
     const target = await targetFor(actor, req.params.id, write);
     const dto = accountDto(target);
     if (!["pending", "active", "existing", "disabled"].includes(dto.status))
-      throw new AccountError("User unavailable.", 403);
+      throw new AccountError("Akun pengguna nonaktif atau tidak tersedia.", 403);
     return {
       actor: {
         id: String(actor._id),
@@ -406,7 +406,7 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
     const target = await targetFor(actor, req.params.id, write);
     const dto = accountDto(target);
     if (!["pending", "active", "existing", ...(revocation ? ["disabled"] : [])].includes(dto.status))
-      throw new AccountError("User unavailable.", 403);
+      throw new AccountError("Akun pengguna nonaktif atau tidak tersedia.", 403);
     return {
       actor_id: String(actor._id),
       target_id: dto.id,
@@ -437,12 +437,12 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
       actual.length !== expected.length ||
       !timingSafeEqual(actual, expected)
     )
-      throw new AccountError("Unauthorized.", 401);
+      throw new AccountError("Sesi Anda berakhir. Silakan login ulang.", 401);
     const target = await find({ _id: id(req.params.id) });
-    if (!target) throw new AccountError("User not found.", 404);
+    if (!target) throw new AccountError("Pengguna tidak ditemukan. Muat ulang daftar pengguna.", 404);
     const dto = accountDto(target);
     if (!["active", "existing"].includes(dto.status))
-      throw new AccountError("User unavailable.", 403);
+      throw new AccountError("Akun pengguna nonaktif atau tidak tersedia.", 403);
     return {
       id: dto.id,
       status: dto.status,

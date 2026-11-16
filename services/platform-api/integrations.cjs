@@ -11,10 +11,10 @@ const SECTIONS = {
 function createIntegrations({ hasCapability, fetchImpl = fetch }) {
   async function allowed(req, write) {
     const id = String(req.user?.id ?? req.user?._id ?? "");
-    if (!/^[0-9a-f]{24}$/.test(id)) throw new AccountError("Unauthorized.", 401);
+    if (!/^[0-9a-f]{24}$/.test(id)) throw new AccountError("Sesi Anda berakhir. Silakan login ulang.", 401);
     const principal = { id, role: req.user.role, tenantId: req.user.tenantId };
     if (!(await hasCapability(principal, "access:admin")) || !(await hasCapability(principal, write ? "manage:configs" : "read:configs")))
-      throw new AccountError("Insufficient permissions.", 403);
+      throw new AccountError("Anda tidak punya izin untuk tindakan ini.", 403);
     return id;
   }
   async function mcp(path, method, body) {
@@ -36,7 +36,7 @@ function createIntegrations({ hasCapability, fetchImpl = fetch }) {
   }
   const section = (req) => {
     const name = req.params?.name ?? "openmetadata";
-    if (!Object.hasOwn(SECTIONS, name)) throw new AccountError("Not found.", 404);
+    if (!Object.hasOwn(SECTIONS, name)) throw new AccountError("Bagian pengaturan tidak dikenal.", 404);
     return name;
   };
   const form = (name, body) => Object.fromEntries(SECTIONS[name].filter((k) => body && Object.hasOwn(body, k)).map((k) => [k, body[k]]));
