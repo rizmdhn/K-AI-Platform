@@ -44,19 +44,20 @@ export function AccountSetupSection({ userId }: { userId: string }) {
       {profile.isSuccess && <Notice tone="success">Nama dan email disimpan. Pengguna login dengan email baru.</Notice>}
       {profile.error && <Notice tone="error">{errorText(profile.error, 'Nama dan email gagal disimpan. Coba lagi.')}</Notice>}
     </form>}
-    {account && <label className="flex flex-col gap-1 text-sm">Role platform<Select value={account.role} disabled={!canManage || changeRole.isPending || account.status === 'disabled'} onChange={event => { changeRole.reset(); setRole(event.target.value as 'USER' | 'ADMIN'); }}><option value="USER">USER — pengguna chat</option><option value="ADMIN">ADMIN — mengelola pengguna dan pengaturan</option></Select></label>}
+    {account && <label className="flex flex-col gap-1 text-sm">Role platform{account.status === 'disabled' && <span className="text-xs text-(--cui-color-text-muted)">Role akun nonaktif tidak bisa diubah.</span>}<Select value={account.role} disabled={!canManage || changeRole.isPending || account.status === 'disabled'} onChange={event => { changeRole.reset(); setRole(event.target.value as 'USER' | 'ADMIN'); }}><option value="USER">USER — pengguna chat</option><option value="ADMIN">ADMIN — mengelola pengguna dan pengaturan</option></Select></label>}
     {changeRole.error && <Notice tone="error">{errorText(changeRole.error, 'Role gagal diubah. Coba lagi.')}</Notice>}
     {query.isError && <Notice tone="error">Pengaturan akun tidak tersedia. Coba muat ulang.</Notice>}
     {!query.isError && account && canManage && <div className="flex flex-wrap gap-2">
       {account.status === 'pending' && <Button type="primary" label="Buat tautan aktivasi baru" disabled={reissue.isPending || disable.isPending} onClick={() => reissue.mutate()} />}
       {(account.status === 'active' || account.status === 'existing') && <Button type="secondary" label="Buat tautan reset password" disabled={reset.isPending || disable.isPending} onClick={() => reset.mutate()} />}
-      <Button type="danger" label={account.status === 'disabled' ? 'Ulangi pembersihan akses' : 'Nonaktifkan akun'} disabled={disable.isPending || reissue.isPending} onClick={() => setConfirm(true)} />
+      {(account.status !== 'disabled' || pendingParts.length > 0) && <Button type="danger" label={account.status === 'disabled' ? 'Ulangi pembersihan akses' : 'Nonaktifkan akun'} disabled={disable.isPending || reissue.isPending} onClick={() => setConfirm(true)} />}
     </div>}
+    {account?.status === 'disabled' && pendingParts.length === 0 && <p className="text-sm text-(--cui-color-text-muted)">Akun nonaktif permanen dan pembersihan sudah tuntas. Pengaktifan kembali tidak tersedia di panel. Untuk orang yang sama, buat akun baru (ganti dulu email akun ini bila ingin memakai email yang sama).</p>}
     {account?.status === 'pending' && reissue.data && <ActivationLink invitation={reissue.data} />}
     {account?.status !== 'pending' && account?.status !== 'disabled' && reset.data && <ActivationLink invitation={reset.data} reset />}
     {account?.status === 'disabled' && pendingParts.length > 0 && <Notice tone="warning">
       <p>Akun sudah nonaktif dan tidak bisa login, tetapi pembersihan belum selesai: <strong>{pendingParts.join(', ')}</strong>.</p>
-      <p>Klik <strong>Ulangi pembersihan akses</strong>. Jika tetap gagal, periksa log server (<code>docker logs LibreChat | grep "\[kai\] disable"</code>) dan menu Perlu perhatian.</p>
+      <p>Klik <strong>Ulangi pembersihan akses</strong>. Jika tetap gagal, cari baris <code>[kai] disable</code> di log layanan api (<code>make logs</code>) dan lihat menu Perlu perhatian.</p>
     </Notice>}
     {(reissue.error || reset.error || disable.error) && <Notice tone="error">{disable.error ? errorText(disable.error, 'Akun gagal dinonaktifkan. Coba lagi.') : reset.error ? errorText(reset.error, 'Tautan reset password gagal dibuat. Coba lagi.') : errorText(reissue.error, 'Tautan aktivasi gagal dibuat. Coba lagi.')}</Notice>}
     <ConfirmDialog open={!!role} title={role === 'ADMIN' ? 'Jadikan ADMIN' : 'Jadikan USER'} description={role === 'ADMIN' ? 'Pengguna ini akan bisa membuka Admin Panel, mengelola semua pengguna, dan mengubah pengaturan.' : 'Pengguna ini kehilangan akses Admin Panel dan hanya bisa memakai chat.'} confirmLabel={role === 'ADMIN' ? 'Jadikan ADMIN' : 'Jadikan USER'} saving={changeRole.isPending} onConfirm={() => role && changeRole.mutate(role)} onCancel={() => setRole(null)} />

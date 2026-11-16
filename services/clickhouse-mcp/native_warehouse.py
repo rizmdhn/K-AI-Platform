@@ -82,7 +82,8 @@ async def native_context(authorization, subject, write=False):
         or not isinstance(data["actor_id"], str)
         or not re.fullmatch(r"[0-9a-f]{24}", data["actor_id"])
         or data["target_id"] != subject
-        or data["status"] not in ("pending", "active", "existing")
+        # Reads may show a disabled account's (revoked) binding; any write still requires an enabled account.
+        or data["status"] not in (("pending", "active", "existing") if write else ("pending", "active", "existing", "disabled"))
     ):
         raise ApprovalError(503, "Platform account verification is unavailable.")
     ref = data["warehouse"]

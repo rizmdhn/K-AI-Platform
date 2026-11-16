@@ -435,7 +435,8 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
     if (write) strict(req.body, []);
     const target = await targetFor(actor, req.params.id, write);
     const dto = accountDto(target);
-    if (!["pending", "active", "existing", ...(revocation ? ["disabled"] : [])].includes(dto.status))
+    // Disabled accounts stay readable (status shows the revoked binding and offers release); writes need the revocation context.
+    if (!["pending", "active", "existing", ...(revocation || !write ? ["disabled"] : [])].includes(dto.status))
       throw new AccountError("Akun pengguna nonaktif atau tidak tersedia.", 403);
     return {
       actor_id: String(actor._id),

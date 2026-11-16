@@ -80,11 +80,11 @@ export function WarehouseAccessSection({ userId }: { userId: string }) {
         <Button type="secondary" htmlType="button" label={checking === 'connection' ? 'Menguji…' : 'Tes koneksi'} disabled={busy || !!checking || !canSave} onClick={() => void test('connection')} />
         <Button type="secondary" htmlType="button" label={checking === 'credentials' ? 'Menguji…' : 'Tes kredensial'} disabled={busy || !!checking || !canSave || !password || !username.trim()} onClick={() => void test('credentials')} />
         <Button type="primary" htmlType="submit" label={lockedIdentity ? 'Ganti password' : 'Simpan kredensial'} disabled={busy || !!checking || !canSave || !password || !username.trim()} />
-        {(status.credentials_saved || status.state === 'active' || status.state === 'revoked') && <Button type="danger" htmlType="button" label={status.state === 'revoked' ? 'Ulangi pencabutan akses' : 'Cabut akses'} disabled={busy} onClick={() => { setPassword(''); setConfirm(true); }} />}
+        {(status.state === 'revoked' ? cleanupIncomplete || !!account.data?.chatbot_cleanup_pending : status.credentials_saved || status.state === 'active') && <Button type="danger" htmlType="button" label={status.state === 'revoked' ? 'Ulangi pencabutan akses' : 'Cabut akses'} disabled={busy} onClick={() => { setPassword(''); setConfirm(true); }} />}
         {status.state === 'revoked' && !released && <Button type="secondary" htmlType="button" label="Lepaskan akun ClickHouse" disabled={busy} onClick={() => { setPassword(''); setConfirmRelease(true); }} />}
       </div>}
     </form>}
-    {canManage && status && !status.credentials_saved && status.state !== 'revoked' && <p className="text-xs text-(--cui-color-text-muted)">Tes koneksi memeriksa server ClickHouse bisa dijangkau (tanpa login). Tes kredensial memeriksa login dan akses read-only tanpa menyimpan. Simpan kredensial menguji ulang lalu menyimpan password terenkripsi.</p>}
+    {canManage && status && !disabledAccount && !status.credentials_saved && status.state !== 'revoked' && <p className="text-xs text-(--cui-color-text-muted)">Tes koneksi memeriksa server ClickHouse bisa dijangkau (tanpa login). Tes kredensial memeriksa login dan akses read-only tanpa menyimpan. Simpan kredensial menguji ulang lalu menyimpan password terenkripsi.</p>}
     {check && <Notice tone={check.ok ? 'success' : 'error'}>{check.kind === 'connection' ? 'Tes koneksi: ' : 'Tes kredensial: '}{check.message}</Notice>}
     {success && !disabledAccount && <Notice tone="success">Berhasil terhubung ke ClickHouse.</Notice>}
     {cleanupIncomplete && <Notice tone="warning">Akses dicabut. Pembersihan akses chatbot belum selesai. Ulangi pencabutan akses.</Notice>}

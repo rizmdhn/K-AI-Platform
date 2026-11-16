@@ -95,6 +95,10 @@ async function main() {
       assert.equal((await call(`/api/admin/users/${holderId}/kai-warehouse/prepare`, admin.token, "POST", {})).status, 200);
       assert.equal((await call(`/api/admin/users/${holderId}/kai-warehouse/release`, admin.token, "POST", {})).status, 409, "release before revoke");
       assert.equal((await call(`/api/admin/users/${holderId}/kai-disable`, admin.token, "POST", {})).status, 200);
+      const disabledStatus = await call(`/api/admin/users/${holderId}/kai-warehouse`, admin.token);
+      assert.equal(disabledStatus.status, 200, "disabled account status stays readable");
+      assert.equal((await disabledStatus.json()).state, "revoked");
+      assert.equal((await call(`/api/admin/users/${holderId}/kai-warehouse/prepare`, admin.token, "POST", {})).status, 403, "writes stay refused");
       assert.equal((await call(`/api/admin/users/${user.id}/kai-account`, admin.token, "PATCH", ref)).status, 409, "username still held");
       const released = await call(`/api/admin/users/${holderId}/kai-warehouse/release`, admin.token, "POST", {});
       assert.equal(released.status, 200, await released.clone().text());
