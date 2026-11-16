@@ -6,13 +6,15 @@ type Issue = Problems['accounts'][number]['issues'][number];
 type SystemIssue = Problems['system'][number];
 const time = (at?: string) => (at ? new Date(at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) : '');
 const checks: Record<string, string> = { binding_dsn: 'koneksi database metadata', keyring: 'kunci enkripsi', warehouse_target: 'alamat ClickHouse' };
-function accountText(issue: Issue) {
+const parts = { warehouse: 'akses ClickHouse', chatbot: 'izin chatbot CH' } as const;
+/** [problem, fix] for one account issue. */
+function accountText(issue: Issue): [string, string] {
   switch (issue.code) {
-    case 'agent_without_binding': return 'Punya akses K-AI Analis Data, tetapi kredensial CH belum aktif. Isi kredensial atau cabut akses agent.';
-    case 'ch_login_rejected': return `ClickHouse menolak login tersimpan sejak ${time(issue.at)}; password mungkin berubah. Simpan ulang kredensial.`;
-    case 'many_denials': return `${issue.count} penolakan akses data dalam 24 jam. Periksa grant CH atau pertanyaan pengguna.`;
-    case 'cleanup_pending': return 'Akun nonaktif, tetapi pencabutan akses belum tuntas. Klik Nonaktifkan lagi untuk mengulang.';
-    default: return issue.code;
+    case 'agent_without_binding': return ['Punya akses K-AI Analis Data, tetapi kredensial ClickHouse belum aktif.', 'Detail user → Akses data ClickHouse: isi kredensial, atau matikan akses chatbot.'];
+    case 'ch_login_rejected': return [`ClickHouse menolak login tersimpan sejak ${time(issue.at)}. Password mungkin sudah berubah.`, 'Detail user → Akses data ClickHouse → Ganti password.'];
+    case 'many_denials': return [`${issue.count} penolakan akses data dalam 24 jam.`, 'Periksa grant ClickHouse akun ini atau pertanyaan pengguna.'];
+    case 'cleanup_pending': return [`Akun nonaktif, tetapi pencabutan belum tuntas${issue.parts?.length ? `: ${issue.parts.map(part => parts[part]).join(', ')}` : ''}.`, 'Detail user → bagian Akun → klik Ulangi pembersihan akses.'];
+    default: return [issue.code, ''];
   }
 }
 function systemText(issue: SystemIssue) {
@@ -38,12 +40,17 @@ export function ProblemsPanel() {
     </div>
     {query.isError && <p role="alert" className="mt-2 text-sm">Daftar masalah belum tersedia.</p>}
     {data && !total && <p className="mt-2 text-sm text-(--cui-color-text-muted)">Tidak ada masalah terdeteksi dalam 24 jam terakhir.</p>}
-    {data && data.system.length > 0 && <ul className="mt-2 list-disc pl-5 text-sm">{data.system.map((issue, i) => <li key={i}>{systemText(issue)}</li>)}</ul>}
-    {data && data.accounts.length > 0 && <ul className="mt-2 flex flex-col gap-2 text-sm">{data.accounts.map((account) => <li key={account.id}>
-      <strong>{account.name || account.email}</strong> <span className="text-(--cui-color-text-muted)">{account.email}</span>
-      <ul className="list-disc pl-5">{account.issues.map((issue) => <li key={issue.code}>{accountText(issue)}</li>)}</ul>
-    </li>)}</ul>}
-    {data && data.accounts.length > 0 && <p className="mt-2 text-sm"><Link to="/users">Buka Users untuk memperbaiki akun</Link></p>}
+    {data && total > 0 && <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm">
+      <thead className="text-xs text-(--cui-color-text-muted)"><tr><th className="py-2 pr-4 font-medium">Pengguna</th><th className="py-2 pr-4 font-medium">Masalah</th><th className="py-2 font-medium">Cara memperbaiki</th></tr></thead>
+      <tbody>
+        {data.system.map((issue, i) => <tr key={`system-${i}`} className="border-t border-(--cui-color-stroke-default) align-top"><td className="py-2 pr-4 font-medium">Sistem</td><td className="py-2 pr-4">{systemText(issue)}</td><td className="py-2">Periksa layanan di server (<code>make ps</code>, <code>make logs</code>).</td></tr>)}
+        {data.accounts.flatMap(account => account.issues.map(issue => { const [problem, fix] = accountText(issue); return <tr key={`${account.id}-${issue.code}`} className="border-t border-(--cui-color-stroke-default) align-top">
+          <td className="py-2 pr-4"><div className="font-medium">{account.name || account.email}</div><div className="text-xs text-(--cui-color-text-muted)">{account.email}</div></td>
+          <td className="py-2 pr-4">{problem}</td>
+          <td className="py-2">{fix} <Link to="/users" className="underline">Buka Users</Link></td>
+        </tr>; }))}
+      </tbody>
+    </table></div>}
     {data && <p className="mt-2 text-xs text-(--cui-color-text-muted)">Dari log audit dan status akun, tanpa menghubungi ClickHouse. Diperbarui {time(data.generated_at)}.</p>}
   </section>;
 }

@@ -45,7 +45,7 @@ function createProblems({ accounts, managedAgent, aclEntries, VIEW, USER, fetchI
     const flagged = [];
     for (const user of users) {
       const issues = [], usage = mcp?.users?.[user.id], last = usage?.last_error;
-      if (user.status === "disabled" && user.cleanupPending) issues.push({ code: "cleanup_pending" });
+      if (user.status === "disabled" && user.cleanupPending) issues.push({ code: "cleanup_pending", parts: user.cleanupParts ?? [] });
       if (["active", "existing"].includes(user.status) && mcp?.database_available && viewers.has(user.id) && !active.has(user.id))
         issues.push({ code: "agent_without_binding" });
       if (last?.outcome === "login_rejected" && !(usage.last_ok > last.at)) issues.push({ code: "ch_login_rejected", at: last.at });

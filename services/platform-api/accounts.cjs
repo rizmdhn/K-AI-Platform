@@ -62,13 +62,14 @@ function validatePassword(password, confirm, min = 8) {
     password.includes("\0")
   )
     throw new AccountError(
-      `Password minimal ${Math.max(8, min)} karakter dan maksimal 72 byte. Buka kembali tautan aktivasi, lalu coba lagi.`,
+      `Password minimal ${Math.max(8, min)} karakter dan maksimal 72 byte. Buka kembali tautan dari administrator, lalu coba lagi.`,
     );
-  if (password !== confirm) throw new AccountError("Konfirmasi password tidak sama. Buka kembali tautan aktivasi, lalu coba lagi.");
+  if (password !== confirm) throw new AccountError("Konfirmasi password tidak sama. Buka kembali tautan dari administrator, lalu coba lagi.");
   return password;
 }
 const activationHash = (token) =>
   createHash("sha256").update(token).digest("hex");
+const INVALID_LINK = "Tautan tidak valid, sudah dipakai, atau kedaluwarsa. Minta tautan baru ke administrator.";
 function newActivation() {
   const token = `kai_${randomBytes(32).toString("hex")}`;
   return {
@@ -82,8 +83,12 @@ function accountDto(user) {
   return {
     id: String(user._id),
     status: a.status ?? "existing",
+    role: user.role === "ADMIN" ? "ADMIN" : "USER",
+    name: user.name ?? "",
+    email: user.email ?? "",
     expiresAt: a.status === "pending" ? a.activationExpiresAt : undefined,
     warehouse_revocation_pending: a.warehouseRevocationPending === true,
+    chatbot_cleanup_pending: a.chAclCleanupPending === true,
     warehouse:
       a.chService && a.chUsername
         ? { service: a.chService, username: a.chUsername, status: "unverified" }
@@ -228,6 +233,7 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
         id: String(u._id), name: u.name ?? "", email: u.email ?? "",
         status: u.kaiAccount?.status ?? "existing",
         cleanupPending: u.kaiAccount?.warehouseRevocationPending === true || u.kaiAccount?.chAclCleanupPending === true,
+        cleanupParts: [...(u.kaiAccount?.warehouseRevocationPending === true ? ["warehouse"] : []), ...(u.kaiAccount?.chAclCleanupPending === true ? ["chatbot"] : [])],
       })),
     };
   }
@@ -286,37 +292,61 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
       typeof body.token !== "string" ||
       !/^kai_[a-f0-9]{64}$/.test(body.token)
     )
-      throw new AccountError("Tautan aktivasi tidak valid, sudah dipakai, atau kedaluwarsa. Minta tautan baru ke administrator.");
+      throw new AccountError(INVALID_LINK);
     const password = validatePassword(
       body.password,
       body.confirm_password,
       parseInt(process.env.MIN_PASSWORD_LENGTH, 10) || 8,
     );
-    const filter = {
-      _id: id(body.userId),
-      "kaiAccount.status": "pending",
-      "kaiAccount.activationHash": activationHash(body.token),
-      "kaiAccount.activationExpiresAt": { $gt: new Date() },
-      password: { $exists: false },
-    };
-    if (!(await find(filter, { _id: 1 })))
-      throw new AccountError("Tautan aktivasi tidak valid, sudah dipakai, atau kedaluwarsa. Minta tautan baru ke administrator.");
+    // Pending accounts install their first password; active accounts consume an admin-issued reset link.
+    const userId = id(body.userId), hash = activationHash(body.token);
+    const user = await find({ _id: userId, "kaiAccount.activationHash": hash }, { password: 1, "kaiAccount.status": 1, "kaiAccount.activationExpiresAt": 1 });
+    const status = user?.kaiAccount?.status ?? "existing";
+    const pending = status === "pending" && !user?.password, reset = ["active", "existing"].includes(status) && !!user?.password;
+    if (!user || !(user.kaiAccount.activationExpiresAt > new Date()) || !(pending || reset)) throw new AccountError(INVALID_LINK);
+    const filter = { _id: userId, "kaiAccount.activationHash": hash, "kaiAccount.activationExpiresAt": user.kaiAccount.activationExpiresAt, "kaiAccount.status": user.kaiAccount.status ?? null, password: pending ? { $exists: false } : user.password };
     const hashed = await bcrypt.hash(password, 12);
     // Token consumption and password installation are one atomic Mongo operation.
     const result = await collection.updateOne(filter, {
-      $set: {
-        password: hashed,
-        emailVerified: true,
-        "kaiAccount.status": "active",
-        "kaiAccount.activatedAt": new Date(),
-      },
-      $unset: {
-        "kaiAccount.activationHash": "",
-        "kaiAccount.activationExpiresAt": "",
-      },
+      $set: { password: hashed, emailVerified: true, "kaiAccount.status": "active", ...(pending ? { "kaiAccount.activatedAt": new Date() } : {}) },
+      $unset: { "kaiAccount.activationHash": "", "kaiAccount.activationExpiresAt": "" },
     });
-    if (!result.modifiedCount)
-      throw new AccountError("Tautan aktivasi tidak valid, sudah dipakai, atau kedaluwarsa. Minta tautan baru ke administrator.");
+    if (!result.modifiedCount) throw new AccountError(INVALID_LINK);
+    // ponytail: a failed session purge leaves old logins alive until they expire; the password itself is already replaced.
+    if (reset) await clearSessions(body.userId).catch(() => {});
+  }
+  async function resetLink(req) {
+    const actor = await actorFor(req, true), target = await targetFor(actor, req.params.id, true);
+    strict(req.body, []);
+    if (!["active", "existing"].includes(target.kaiAccount?.status ?? "existing") || !target.password)
+      throw new AccountError("Reset password hanya untuk akun aktif. Akun yang belum aktif memakai tautan aktivasi.", 409);
+    const a = newActivation();
+    const result = await collection.updateOne(
+      { _id: target._id, ...scope(actor), "kaiAccount.status": target.kaiAccount?.status ?? null, password: target.password },
+      { $set: { "kaiAccount.activationHash": a.hash, "kaiAccount.activationExpiresAt": a.expiresAt } },
+    );
+    if (!result.modifiedCount) throw new AccountError("Akun berubah. Muat ulang, lalu coba lagi.", 409);
+    return invitation(req.params.id, a);
+  }
+  async function setRole(req) {
+    const actor = await actorFor(req, true), target = await targetFor(actor, req.params.id, true);
+    strict(req.body, ["role"]);
+    const role = req.body.role;
+    if (!["USER", "ADMIN"].includes(role)) throw new AccountError("Pilih role USER atau ADMIN.");
+    if (actor.role !== "ADMIN") throw new AccountError("Hanya ADMIN yang dapat mengubah role.", 403);
+    if (String(actor._id) === String(target._id)) throw new AccountError("Anda tidak dapat mengubah role akun sendiri. Minta ADMIN lain.", 409); // also keeps at least one ADMIN
+    if (target.role === role) return accountDto(target);
+    const result = await collection.updateOne({ _id: target._id, ...scope(actor), role: target.role }, { $set: { role } });
+    if (!result.modifiedCount) throw new AccountError("Akun berubah. Muat ulang, lalu coba lagi.", 409);
+    return accountDto(await targetFor(actor, req.params.id, false));
+  }
+  async function updateProfile(req) {
+    const actor = await actorFor(req, true), target = await targetFor(actor, req.params.id, true);
+    strict(req.body, ["name", "email"]);
+    const { name, email } = parseCreate({ name: req.body.name, email: req.body.email, role: "USER" });
+    // A duplicate email hits LibreChat's unique index (11000), which errorResponse explains to the admin.
+    await collection.updateOne({ _id: target._id, ...scope(actor) }, { $set: { name, email } });
+    return accountDto(await targetFor(actor, req.params.id, false));
   }
   async function gate(req, res, next) {
     let user;
@@ -456,6 +486,9 @@ function createAccounts({ mongoose, hasCapability, bcrypt, origin }) {
     read,
     update,
     reissue,
+    resetLink,
+    setRole,
+    updateProfile,
     activate,
     gate,
     disable,

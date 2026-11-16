@@ -4,7 +4,7 @@ import { apiFetch, extractApiError } from './utils/api';
 import { requireCapability } from './capabilities';
 import { SystemCapabilities } from '@/constants';
 export interface AccountSetup {
-  id: string; status: 'pending' | 'active' | 'existing' | 'disabled'; expiresAt?: string; warehouse_revocation_pending?: boolean;
+  id: string; status: 'pending' | 'active' | 'existing' | 'disabled'; role: 'USER' | 'ADMIN'; name: string; email: string; expiresAt?: string; warehouse_revocation_pending?: boolean; chatbot_cleanup_pending?: boolean;
   warehouse: { service: string; username: string; status: 'unverified' } | null;
 }
 export interface Invitation { activationUrl: string; expiresAt: string }
@@ -29,8 +29,17 @@ export const accountSetupFn = createServerFn({ method: 'GET' }).inputValidator(z
 export const reissueActivationFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id }).strict())
   .handler(async ({ data }): Promise<Invitation> => call(`/api/admin/users/${data.id}/kai-activation`, SystemCapabilities.MANAGE_USERS, 'POST', {}));
 
+export const resetPasswordFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id }).strict())
+  .handler(async ({ data }): Promise<Invitation> => call(`/api/admin/users/${data.id}/kai-password-reset`, SystemCapabilities.MANAGE_USERS, 'POST', {}));
+
+export const setRoleFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id, role: z.enum(['USER', 'ADMIN']) }).strict())
+  .handler(async ({ data }): Promise<AccountSetup> => call(`/api/admin/users/${data.id}/kai-role`, SystemCapabilities.MANAGE_USERS, 'PATCH', { role: data.role }));
+
+export const updateProfileFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id, name: z.string().trim().min(1).max(200), email: z.string().trim().email().max(254) }).strict())
+  .handler(async ({ data }): Promise<AccountSetup> => call(`/api/admin/users/${data.id}/kai-profile`, SystemCapabilities.MANAGE_USERS, 'PATCH', { name: data.name, email: data.email.toLowerCase() }));
+
 export const disableAccountFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id }).strict())
-  .handler(async ({ data }): Promise<{ account: AccountSetup; cleanup_complete: boolean }> => call(`/api/admin/users/${data.id}/kai-disable`, SystemCapabilities.MANAGE_USERS, 'POST', {}));
+  .handler(async ({ data }): Promise<{ account: AccountSetup; cleanup_complete: boolean; cleanup?: { sessions: boolean; warehouse: boolean; chatbot: boolean } }> => call(`/api/admin/users/${data.id}/kai-disable`, SystemCapabilities.MANAGE_USERS, 'POST', {}));
 
 export interface WarehouseAccess {
   state: 'reference_required' | 'not_prepared' | 'ready' | 'active' | 'revoked';
@@ -54,7 +63,7 @@ export const warehouseReadinessFn = createServerFn({ method: 'GET' }).inputValid
 export interface Problems {
   generated_at: string; calls_24h: number | null; errors_24h: number | null;
   system: { code: string; check?: string; calls?: number; errors?: number }[];
-  accounts: { id: string; name: string; email: string; issues: { code: string; at?: string; count?: number }[] }[];
+  accounts: { id: string; name: string; email: string; issues: { code: string; at?: string; count?: number; parts?: ('warehouse' | 'chatbot')[] }[] }[];
 }
 export const problemsFn = createServerFn({ method: 'GET' })
   .handler(async (): Promise<Problems> => call('/api/admin/users/kai-problems', SystemCapabilities.READ_USERS));

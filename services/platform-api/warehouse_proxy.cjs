@@ -91,7 +91,7 @@ function createWarehouseProxy({ accounts, fetchImpl = fetch }) {
       if (!response.ok) {
         await response.body?.cancel();
         throw new AccountError(
-          response.status === 400 ? "Akun ClickHouse ditolak. Periksa username, password, dan hak akses." : response.status === 409 ? "Akses berubah. Muat ulang, lalu coba lagi." : "Layanan akses data belum dapat digunakan.",
+          response.status === 400 ? "Akun ClickHouse ditolak. Periksa username, password, dan hak akses." : response.status === 409 ? "Akses tidak bisa disimpan: username ClickHouse ini sudah dipakai pengguna lain, pernah dicabut, atau data berubah. Muat ulang, lalu coba lagi." : "Layanan akses data belum dapat digunakan.",
           [400, 401, 403, 404, 409, 413, 429, 503].includes(response.status)
             ? response.status
             : 503,

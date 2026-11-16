@@ -46,4 +46,12 @@ SELECT NOT EXISTS (
     \ir migrations/007_more_settings.sql
     INSERT INTO kai.schema_migrations (version) VALUES ('007_more_settings');
 \endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM kai.schema_migrations WHERE version = '008_rebind_unverified'
+) AS apply_rebind_unverified \gset
+\if :apply_rebind_unverified
+    \ir migrations/008_rebind_unverified.sql
+    INSERT INTO kai.schema_migrations (version) VALUES ('008_rebind_unverified');
+\endif
 COMMIT;

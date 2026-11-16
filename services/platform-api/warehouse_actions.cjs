@@ -9,7 +9,7 @@ function createWarehouseActions({accounts,warehouse,agents}) {
     if(account.status==='disabled')throw new AccountError('Akun dinonaktifkan.',403);
     const status=await warehouse.status(empty(req));
     if(status.state==='revoked')throw new AccountError('Akses telah dicabut. Hubungi pengelola untuk mengatur ulang akun.',409);
-    if(['active','ready'].includes(status.state)&&status.ch_username!==data.username)throw new AccountError('Penggantian username memerlukan pengaturan akun baru. Gunakan username yang sudah tersimpan.',409);
+    if((status.credentials_saved||status.state==='active')&&status.ch_username!==data.username)throw new AccountError('Penggantian username memerlukan pengaturan akun baru. Gunakan username yang sudah tersimpan.',409);
     await accounts.update({...req,headers:req.headers,body:{warehouse:{service:status.service.host,username:data.username,confirmed:true}}});
     await warehouse.prepare(empty(req));
     return warehouse.credentials({...req,headers:req.headers,body:{password:data.password}});
@@ -26,16 +26,19 @@ function createWarehouseActions({accounts,warehouse,agents}) {
   }
   async function disable(req) {
     const result=await accounts.disable(req);
-    let account=result.account, revoked=false;
+    let account=result.account, revoked=false, reason='';
     try {
       const receipt=await warehouse.revoke(empty(req));
       if (['revoked','not_prepared','reference_required'].includes(receipt.state) && receipt.credentials_saved===false) {
         account=await accounts.completeWarehouseRevocation(empty(req));
         revoked=true;
-      }
-    } catch { /* Disabled remains authoritative; pending is cleared only after durable revocation. */ }
+      } else reason=`unexpected state ${receipt.state}`;
+    } catch(error) { reason=`HTTP ${error?.status??'-'} ${error?.message??''}`; /* Disabled remains authoritative; pending is cleared only after durable revocation. */ }
+    // Status and our own Indonesian message only (never upstream bodies), so operators can see why the retry is needed.
+    if(reason) console.warn(`[kai] disable ${req.params?.id}: ClickHouse revocation incomplete (${reason})`);
     const acl=await cleanup(req);
-    return {account,cleanup_complete:result.cleanup_complete&&revoked&&acl};
+    if(!acl) console.warn(`[kai] disable ${req.params?.id}: chatbot permission cleanup incomplete`);
+    return {account,cleanup_complete:result.cleanup_complete&&revoked&&acl,cleanup:{sessions:result.cleanup_complete,warehouse:revoked,chatbot:acl}};
   }
   async function updateReference(req) {
     const before=await accounts.read(req),after=await accounts.update(req);

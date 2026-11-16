@@ -107,13 +107,13 @@ let step = "launch";
     step = "activation submit";
     const activationResponse = activation.waitForResponse(response => response.url().endsWith("/activate-account") && response.request().method() === "POST");
     await activation
-      .getByRole("button", { name: "Aktifkan akun", exact: true })
+      .getByRole("button", { name: "Simpan password", exact: true })
       .click();
     assert.equal((await activationResponse).status(),200, "Activation must succeed; native submission limits remain enabled.");
     step = "activation confirmation";
     try {
       await activation
-        .getByRole("heading", { name: "Akun berhasil diaktifkan" })
+        .getByRole("heading", { name: "Password berhasil disimpan" })
         .waitFor();
     } catch (e) {
       console.log(
