@@ -40,3 +40,18 @@ test("each section forwards only its own fields; unknown sections are 404", asyn
   assert.deepEqual(JSON.parse(calls[1].init.body), { max_memory_gb: 9, updated_by: ADMIN });
   await assert.rejects(api.get(req({}, "../binding")), { status: 404 });
 });
+test("smtp test needs manage:configs and forwards only the recipient; mail never throws", async () => {
+  const { api, calls, req } = build();
+  await api.testSmtp(req({ to: "a@b.co", host: "evil" }, "smtp"));
+  assert.match(calls[0].url, /integrations\/smtp\/test$/);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { to: "a@b.co" });
+  await assert.rejects(build(["access:admin", "read:configs"]).api.testSmtp(req({ to: "a@b.co" }, "smtp")), (e) => e.status === 403);
+  assert.deepEqual(await api.mail("a@b.co", "s", "t"), { sent: true });
+  assert.match(calls.at(-1).url, /\/v1\/internal\/mail$/);
+  for (const [status, configured] of [[409, false], [400, true], [503, true]]) {
+    const off = createIntegrations({ hasCapability: async () => true, fetchImpl: async () => ({ ok: false, status, text: async () => JSON.stringify({ message: "SMTP belum dikonfigurasi." }) }) });
+    const result = await off.mail("a@b.co", "s", "t");
+    assert.equal(result.sent, false);
+    assert.equal(result.configured, configured);
+  }
+});

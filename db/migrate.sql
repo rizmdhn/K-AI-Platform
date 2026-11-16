@@ -54,4 +54,20 @@ SELECT NOT EXISTS (
     \ir migrations/008_rebind_unverified.sql
     INSERT INTO kai.schema_migrations (version) VALUES ('008_rebind_unverified');
 \endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM kai.schema_migrations WHERE version = '009_smtp_settings'
+) AS apply_smtp_settings \gset
+\if :apply_smtp_settings
+    \ir migrations/009_smtp_settings.sql
+    INSERT INTO kai.schema_migrations (version) VALUES ('009_smtp_settings');
+\endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM kai.schema_migrations WHERE version = '010_release_ch_username'
+) AS apply_release_ch_username \gset
+\if :apply_release_ch_username
+    \ir migrations/010_release_ch_username.sql
+    INSERT INTO kai.schema_migrations (version) VALUES ('010_release_ch_username');
+\endif
 COMMIT;

@@ -291,10 +291,10 @@ test("binding cleanup works for disabled target without managed owner/model vali
 });
 test("cleanup preserves owner higher and mixed inherited user permissions",async()=>{
  for(const kind of ["owner","higher","inherited"]){const {state,api,req}=fixture();state.entries=[{principalType:"user",principalId:"target",permBits:kind==="higher"?3:1}];if(kind==="owner")state.owner="target";if(kind==="inherited")state.entries.push({principalType:"user",principalId:"target",permBits:1,inheritedFrom:"parent"});
- assert.deepEqual(await api.revokeManaged(req),{cleanup_complete:false});assert.equal(state.writes.length,0);assert.equal(state.pending,true);}
+ assert.equal((await api.revokeManaged(req)).cleanup_complete,false);assert.equal(state.writes.length,0);assert.equal(state.pending,true);}
 });
 test("cleanup failures persist pending without exposing upstream errors",async()=>{
- const {deps,state,req}=fixture();deps.getAgent=async()=>{throw Error("private-password");};assert.deepEqual(await createAgentAccess(deps).revokeManaged(req),{cleanup_complete:false});assert.equal(state.pending,true);
+ const {deps,state,req}=fixture();deps.getAgent=async()=>{throw Error("private-password");};{const r=await createAgentAccess(deps).revokeManaged(req);assert.equal(r.cleanup_complete,false);assert.ok(!/private|secret|mongo/i.test(r.reason??''));}assert.equal(state.pending,true);
 });
 test("native share guard blocks managed CH writes for agent and remote agent only",async()=>{
  for(const type of ["agent","remote_agent","promptGroup"]){for(const id of ["native-id","other"]){const {api}=fixture();let next=false;let status;let body;const res={status(n){status=n;return this;},json(b){body=b;return this;}};

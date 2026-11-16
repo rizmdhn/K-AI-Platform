@@ -24,7 +24,8 @@ BEGIN
    ELSE ARRAY[to_regprocedure('kai.warehouse_status(text,text,text,text)')::oid,
     to_regprocedure('kai.warehouse_prepare(text,text,text,text,text,uuid)')::oid,
     to_regprocedure('kai.warehouse_save(text,text,text,text,text,uuid,uuid,bytea,integer,uuid)')::oid,
-    to_regprocedure('kai.warehouse_revoke(text,text,text,uuid)')::oid] END;
+    to_regprocedure('kai.warehouse_revoke(text,text,text,uuid)')::oid,
+  to_regprocedure('kai.warehouse_release(text,text,text,uuid)')::oid] END;
   IF array_position(allowed,NULL) IS NOT NULL
    OR NOT has_schema_privilege(group_oid,'kai','USAGE')
    OR has_schema_privilege(group_oid,'kai','CREATE')

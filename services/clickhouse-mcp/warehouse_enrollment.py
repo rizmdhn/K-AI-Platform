@@ -119,10 +119,11 @@ async def body(request, keys):
 
 async def warehouse_request(request):
     request_id = uuid4()
+    suffix = request.url.path.rsplit("/", 1)[-1]
     try:
         context = (
             await revocation_context(request.headers.get('authorization'), request.path_params.get('subject'))
-            if request.method == 'DELETE' else
+            if request.method == 'DELETE' or suffix == 'release' else
             await native_context(request.headers.get('authorization'), request.path_params.get('subject'), request.method != 'GET')
         )
         actor, subject = context["actor_id"], context["target_id"]
@@ -130,10 +131,12 @@ async def warehouse_request(request):
         ref = context["warehouse"]
         username = ref["username"] if ref else ""
         decision = await store.status(actor, subject, username)
-        suffix = request.url.path.rsplit("/", 1)[-1]
         if request.method == "DELETE":
             await body(request, ())
             decision = await store.revoke(actor, subject, request_id)
+        elif suffix == "release":
+            await body(request, ())
+            decision = await store.release(actor, subject, request_id)
         elif request.method != "GET":
             if not ref or ref["service"] != urlsplit(service).hostname:
                 raise ApprovalError(
@@ -233,9 +236,62 @@ async def warehouse_eligibility(request):
         return JSONResponse({'message': 'Warehouse eligibility is unavailable.'}, status_code=503, headers={'Cache-Control': 'no-store'})
 
 
+async def ping_clickhouse():
+    """Reach the configured ClickHouse over verified HTTPS without credentials (GET /ping)."""
+    service = configured_service()
+    try:
+        async with asyncio.timeout(6):
+            async with httpx.AsyncClient(timeout=3, trust_env=False, follow_redirects=False, verify=_tls()) as client:
+                response = await client.get(service + "/ping")
+    except (ssl.SSLError, httpx.ConnectError) as error:
+        if isinstance(error, ssl.SSLError) or "CERTIFICATE" in str(error).upper():
+            raise ApprovalError(400, "Sertifikat TLS server ClickHouse tidak dipercaya. Periksa CLICKHOUSE_CA_CERT untuk CA privat.") from None
+        raise ApprovalError(400, "Server ClickHouse tidak bisa dihubungi dari server K-AI. Periksa host, port, dan izin jaringan keluar (IP allowlist ClickHouse).") from None
+    except (TimeoutError, httpx.TimeoutException):
+        raise ApprovalError(400, "Koneksi ke server ClickHouse habis waktu. Biasanya IP server K-AI belum di-allowlist di ClickHouse.") from None
+    except Exception:
+        raise ApprovalError(400, "Server ClickHouse tidak bisa dihubungi dari server K-AI.") from None
+    if response.status_code != 200:
+        raise ApprovalError(400, f"Server ClickHouse menjawab HTTP {response.status_code}. Periksa alamat dan port HTTPS ClickHouse.")
+
+
+async def warehouse_check(request):
+    """Admin-triggered tests that store nothing: 'connection' (no credentials) or 'credentials' (login + read-only)."""
+    try:
+        await native_context(request.headers.get("authorization"), request.path_params.get("subject"), True)
+        service = configured_service()
+        target = urlsplit(service)
+        if request.url.path.endswith("/connection"):
+            await body(request, ())
+            await ping_clickhouse()
+            message = f"Server ClickHouse {target.hostname}:{target.port} bisa dijangkau."
+        else:
+            data = await body(request, ("username", "password"))
+            username, password = data.pop("username"), data.pop("password")
+            if (not isinstance(username, str) or not username or username != username.strip() or len(username.encode()) > 1024
+                    or any(ord(c) < 32 or ord(c) == 127 for c in username) or not isinstance(password, str) or not password
+                    or "\x00" in password or len(password.encode()) > 4096):
+                raise ApprovalError(400, "Periksa username dan password ClickHouse.")
+            await verify_clickhouse(username, password, uuid4())
+            del password
+            message = f"Login {username} berhasil dan akunnya read-only. Kredensial belum disimpan."
+        return JSONResponse({"ok": True, "message": message}, headers={"Cache-Control": "no-store"})
+    except ApprovalError as error:
+        if error.status == 400:
+            text = {"ClickHouse login or access was rejected.": "ClickHouse menolak username atau password.",
+                    "ClickHouse identity or read-only verification failed.": "Login berhasil, tetapi akun ini tidak read-only atau identitasnya tidak cocok. Minta DBA mengatur akun read-only.",
+                    "Invalid enrollment fields.": "Periksa username dan password ClickHouse."}.get(str(error), str(error))
+            return JSONResponse({"ok": False, "message": text}, headers={"Cache-Control": "no-store"})
+        return JSONResponse({"message": str(error)}, status_code=error.status, headers={"Cache-Control": "no-store"})
+    except Exception:
+        return JSONResponse({"message": "Warehouse check is unavailable."}, status_code=503, headers={"Cache-Control": "no-store"})
+
+
 def register_warehouse_routes(mcp):
     root = "/v1/admin/warehouse-users/{subject}"
     mcp.custom_route(root, methods=["GET", "DELETE"])(warehouse_request)
     mcp.custom_route(root + '/eligibility', methods=['GET'])(warehouse_eligibility)
-    for action in ("prepare", "credentials"):
+    for check in ("connection", "credentials"):
+        mcp.custom_route(root + "/check/" + check, methods=["POST"])(warehouse_check)
+    for action in ("prepare", "credentials", "release"):
         mcp.custom_route(root + "/" + action, methods=["POST"])(warehouse_request)

@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { AccessDenied, PermissionsUnavailable } from '@/components/shared';
 import { IntegrationsPanel } from '@/components/users/IntegrationsPanel';
 import { SettingsSection } from '@/components/users/SettingsSection';
+import { SmtpTest } from '@/components/users/SmtpTest';
 import { SystemCapabilities } from '@/constants';
 import { useCapabilities } from '@/hooks';
 export const Route = createFileRoute('/_app/integrations')({ component: IntegrationsRoute });
@@ -12,7 +13,7 @@ function IntegrationsRoute() {
   if (!hasCapability(SystemCapabilities.READ_CONFIGS)) return <AccessDenied />;
   return <div className="flex flex-col gap-4 p-6">
     <h1 className="text-xl font-medium">Integrasi</h1>
-    <IntegrationsPanel defaultOpen />
+    <IntegrationsPanel />
     <SettingsSection name="batch_model" title="Model AI untuk tugas batch"
       description={<div className="flex flex-col gap-2">
         <p>Model ini mengerjakan tugas otomatis yang memproses banyak data sekaligus. Model ini tidak dipakai untuk chat: asisten chat memakai modelnya sendiri.</p>
@@ -31,6 +32,22 @@ function IntegrationsRoute() {
         { key: 'jobs_per_day', label: 'Job pelabelan per pengguna per hari', type: 'number', min: 1, max: 1000 },
         { key: 'sample_rows', label: 'Ukuran sampel (baris)', type: 'number', min: 100, max: 5000, help: 'Di atas 5.000 baris, yang dilabeli adalah sampel acak sebanyak ini; hasilnya berupa perkiraan dengan margin kesalahan.' },
       ]} />
+    <SettingsSection name="smtp" title="Email keluar (SMTP)"
+      description={<div className="flex flex-col gap-2">
+        <p>Dipakai untuk mengirim tautan aktivasi akun dan reset password langsung ke email pengguna. Selama belum diatur, admin menyalin tautan dari detail pengguna dan mengirimkannya sendiri.</p>
+        <p>Isi dengan server email perusahaan (mis. Microsoft 365, Google Workspace, atau relay internal). Alamat email pengguna akan dikirim ke server ini.</p>
+      </div>}
+      fields={[
+        { key: 'host', label: 'Host SMTP', type: 'text', placeholder: 'smtp.office365.com', help: 'Kosongkan untuk mematikan pengiriman email.' },
+        { key: 'security', label: 'Keamanan koneksi', type: 'select', options: [{ value: 'starttls', label: 'STARTTLS (biasanya port 587)' }, { value: 'ssl', label: 'SSL/TLS (biasanya port 465)' }, { value: 'none', label: 'Tanpa enkripsi (hanya relay internal)' }] },
+        { key: 'port', label: 'Port', type: 'number', min: 1, max: 65535 },
+        { key: 'username', label: 'Username', type: 'text', placeholder: 'no-reply@perusahaan.co.id', help: 'Kosongkan bila relay tidak butuh login.' },
+        { key: 'password', label: 'Password', type: 'secret', placeholder: 'Disimpan terenkripsi', help: 'Tidak ditampilkan lagi setelah disimpan. Untuk Microsoft 365/Google, pakai app password.' },
+        { key: 'from', label: 'Alamat pengirim', type: 'text', placeholder: 'no-reply@perusahaan.co.id' },
+        { key: 'from_name', label: 'Nama pengirim', type: 'text', placeholder: 'K-AI' },
+      ]}>
+      <SmtpTest />
+    </SettingsSection>
     <SettingsSection name="limits" title="Batas query dan log"
       description="Batas atas setiap query ClickHouse dari kAI. Profil pengguna di ClickHouse (DBA) tetap berlaku bila lebih ketat atau dikunci."
       fields={[

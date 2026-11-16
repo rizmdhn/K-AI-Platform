@@ -9,7 +9,8 @@ DO $$ DECLARE allowed oid[]; BEGIN
   to_regprocedure('kai.warehouse_status(text,text,text,text)')::oid,
   to_regprocedure('kai.warehouse_prepare(text,text,text,text,text,uuid)')::oid,
   to_regprocedure('kai.warehouse_save(text,text,text,text,text,uuid,uuid,bytea,integer,uuid)')::oid,
-  to_regprocedure('kai.warehouse_revoke(text,text,text,uuid)')::oid];
+  to_regprocedure('kai.warehouse_revoke(text,text,text,uuid)')::oid,
+  to_regprocedure('kai.warehouse_release(text,text,text,uuid)')::oid];
  IF array_position(allowed,NULL) IS NOT NULL
  OR EXISTS(SELECT 1 FROM pg_roles WHERE rolname='kai_enrollment_api' AND
    (rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls))
@@ -29,5 +30,6 @@ GRANT USAGE ON SCHEMA kai TO kai_enrollment_api;
 GRANT EXECUTE ON FUNCTION kai.warehouse_status(TEXT,TEXT,TEXT,TEXT),
  kai.warehouse_prepare(TEXT,TEXT,TEXT,TEXT,TEXT,UUID),
  kai.warehouse_save(TEXT,TEXT,TEXT,TEXT,TEXT,UUID,UUID,BYTEA,INTEGER,UUID),
- kai.warehouse_revoke(TEXT,TEXT,TEXT,UUID) TO kai_enrollment_api;
+ kai.warehouse_revoke(TEXT,TEXT,TEXT,UUID),
+ kai.warehouse_release(TEXT,TEXT,TEXT,UUID) TO kai_enrollment_api;
 COMMIT;

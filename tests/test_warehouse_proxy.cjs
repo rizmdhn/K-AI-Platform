@@ -320,3 +320,20 @@ test('readiness is read-only, bounded and never forwards private diagnostics',as
  value.database_verified=true;await assert.rejects(proxy.readiness(req()),e=>e.status===503);
 });
 test('disabled targets can only reach write-authorized revoke, never enrollment',async()=>{const {createWarehouseProxy}=require('../services/platform-api/warehouse_proxy.cjs');const f=fixture({target:{kaiAccount:{status:'disabled',chService:'ch.example',chUsername:'Analyst'}}});let calls=0;const proxy=createWarehouseProxy({accounts:f.accounts,fetchImpl:async(_url,options)=>{calls++;assert.equal(options.method,'DELETE');return new Response(JSON.stringify({state:'revoked',service:{host:'ch.example',port:8443},ch_username:'Analyst',credentials_saved:false,reference_matches:true}))}});assert.equal((await proxy.revoke(req())).state,'revoked');assert.equal(calls,1);await assert.rejects(proxy.prepare(req()),e=>e.status===403);const readOnly=fixture({caps:['access:admin','read:users']});const denied=createWarehouseProxy({accounts:readOnly.accounts,fetchImpl:async()=>{throw Error('must not forward')}});await assert.rejects(denied.revoke(req()),e=>e.status===403);});
+test("connection and credential checks forward fixed paths, allowlisted fields, and return only ok/message", async () => {
+  const { createWarehouseProxy } = require("../services/platform-api/warehouse_proxy.cjs");
+  const calls = [];
+  const proxy = createWarehouseProxy({
+    accounts: fixture().accounts,
+    fetchImpl: async (url, options) => { calls.push({ url, options }); return new Response(JSON.stringify({ ok: false, message: "ClickHouse menolak username atau password.", password: "NEVER" })); },
+  });
+  assert.deepEqual(await proxy.checkConnection(req({})), { ok: false, message: "ClickHouse menolak username atau password." });
+  assert.equal(calls[0].url, `http://clickhouse-mcp:8000/v1/admin/warehouse-users/${targetId}/check/connection`);
+  const result = await proxy.checkCredentials(req({ username: "other_ro", password: "secret" }));
+  assert.equal(calls[1].url, `http://clickhouse-mcp:8000/v1/admin/warehouse-users/${targetId}/check/credentials`);
+  assert.deepEqual(JSON.parse(calls[1].options.body), { username: "other_ro", password: "secret" });
+  assert.ok(!JSON.stringify(result).includes("NEVER"));
+  await assert.rejects(proxy.checkCredentials(req({ username: "x", password: "y", host: "evil" })), (e) => e.status === 400);
+  await assert.rejects(proxy.checkConnection(req({ password: "y" })), (e) => e.status === 400);
+  assert.equal(calls.length, 2);
+});

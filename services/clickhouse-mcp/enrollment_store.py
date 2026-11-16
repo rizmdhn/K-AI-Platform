@@ -10,6 +10,7 @@ SQL = {
     "prepare": "SELECT kai.warehouse_prepare(%s,%s,%s,%s,%s,%s) AS decision",
     "save": "SELECT kai.warehouse_save(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) AS decision",
     "revoke": "SELECT kai.warehouse_revoke(%s,%s,%s,%s) AS decision",
+    "release": "SELECT kai.warehouse_release(%s,%s,%s,%s) AS decision",
 }
 
 
@@ -88,3 +89,8 @@ async def save(
 
 async def revoke(actor, subject, request):
     return await operation("revoke", (actor, subject, issuer(), request))
+
+
+async def release(actor, subject, request):
+    """Free the ClickHouse username of a revoked binding for another platform user."""
+    return await operation("release", (actor, subject, issuer(), request))

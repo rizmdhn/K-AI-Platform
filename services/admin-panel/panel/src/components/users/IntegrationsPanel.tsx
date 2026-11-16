@@ -5,7 +5,7 @@ import { useCapabilities } from '@/hooks';
 import { SystemCapabilities } from '@/constants';
 import { openMetadataDatabasesFn, openMetadataFn, saveOpenMetadataFn, testOpenMetadataFn } from '@/server/kaiAccounts';
 import type { DatabaseSummary, OpenMetadataSettings } from '@/server/kaiAccounts';
-import { inputClass } from './AccountFields';
+import { Notice, inputClass } from './AccountFields';
 const empty: OpenMetadataSettings = { url: '', service: '', ca_cert: '', catalog_enabled: false, databases: [], scan_hours: 24, max_tables: 50 };
 const sources = { ui: 'Diatur di Admin Panel', env: 'Dari file .env server', none: 'Belum diatur' };
 // OpenMetadata connection and the metadata draft worker, editable here instead of .env.
@@ -45,12 +45,12 @@ export function IntegrationsPanel({ defaultOpen = false }: { defaultOpen?: boole
   return <section aria-label="Integrasi OpenMetadata" className="rounded-lg border border-(--cui-color-stroke-default) p-4">
     <div className="flex items-center justify-between gap-2">
       <h2 className="font-medium">Integrasi OpenMetadata <Badge text={label} state={data?.source === 'none' ? 'neutral' : query.isError ? 'danger' : 'success'} /></h2>
-      <Button type="secondary" label={open ? 'Tutup' : 'Atur'} onClick={() => setOpen(!open)} />
+      <Button type="secondary" label={open ? 'Tutup' : 'Atur'} aria-expanded={open} onClick={() => setOpen(!open)} />
     </div>
     <p className="mt-2 text-sm text-(--cui-color-text-muted)">Katalog metadata ClickHouse milik klien. Pencarian tabel memakai deskripsi dari OpenMetadata, hanya untuk tabel dan kolom yang boleh dilihat pengguna. DBA menyetujui metadata di OpenMetadata.</p>
-    {query.isError && <p role="alert" className="mt-2 text-sm">Pengaturan integrasi tidak bisa dibaca.</p>}
+    {query.isError && <div className="mt-2"><Notice tone="error">Pengaturan integrasi tidak bisa dibaca.</Notice></div>}
     {open && data && <form className="mt-3 flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); void run('save'); }}>
-      {!data.storage_available && <p role="alert" className="text-sm">Penyimpanan pengaturan belum disiapkan di server (jalankan make warehouse-local-setup). Sampai itu, nilai dibaca dari .env.</p>}
+      {!data.storage_available && <Notice tone="warning">Penyimpanan pengaturan belum disiapkan di server (jalankan make warehouse-local-setup). Sampai itu, nilai dibaca dari .env.</Notice>}
       {!canManage && <p className="text-sm">Anda hanya bisa melihat. Perubahan butuh izin kelola konfigurasi.</p>}
       <label className="flex flex-col gap-1 text-sm">URL OpenMetadata<input className={inputClass} value={form.url} disabled={disabled} placeholder="https://openmetadata.perusahaan.co.id" maxLength={2048} onChange={(e) => set('url', e.target.value)} /></label>
       <label className="flex flex-col gap-1 text-sm">Nama service ClickHouse di OpenMetadata<input className={inputClass} value={form.service} disabled={disabled} maxLength={256} onChange={(e) => set('service', e.target.value)} /></label>
@@ -71,8 +71,8 @@ export function IntegrationsPanel({ defaultOpen = false }: { defaultOpen?: boole
         <Button type="secondary" htmlType="button" label="Uji koneksi" disabled={disabled || !form.url} onClick={() => void run('test')} />
         <Button type="primary" htmlType="submit" label="Simpan" disabled={disabled} />
       </div>}
-      {notice && <p role="status" className="text-sm">{notice}</p>}
-      {error && <p role="alert" className="text-sm">{error}</p>}
+      {notice && <Notice tone="success">{notice}</Notice>}
+      {error && <Notice tone="error">{error}</Notice>}
       {lines.length > 0 && <ul className="list-disc pl-5 text-xs">{lines.map((line, i) => <li key={i}>{line}</li>)}</ul>}
       {data.updated_at && <p className="text-xs text-(--cui-color-text-muted)">Terakhir diubah {new Date(data.updated_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}.</p>}
     </form>}

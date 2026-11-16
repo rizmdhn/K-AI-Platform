@@ -151,6 +151,90 @@ class IntegrationSettingsTests(unittest.TestCase):
             self.assertEqual(settings.current(env)["KAI_CH_MAX_EXECUTION_TIME"], "10")
         settings.reset_current()
 
+    SMTP = {"host": "smtp.example.co.id", "port": 587, "security": "starttls", "username": "no-reply",
+            "password": "smtp-secret", "from": "no-reply@example.co.id", "from_name": "K-AI"}
+
+    def test_smtp_form_is_validated_and_password_kept_and_hidden(self):
+        clean = settings.clean_smtp(self.SMTP, {})
+        self.assertEqual((clean["KAI_SMTP_PORT"], clean["KAI_SMTP_PASSWORD"]), ("587", "smtp-secret"))
+        self.assertEqual(settings.clean_smtp({**self.SMTP, "password": ""}, {"KAI_SMTP_PASSWORD": "saved"})["KAI_SMTP_PASSWORD"], "saved")
+        self.assertEqual(settings.clean_smtp({"host": ""}, {"KAI_SMTP_PASSWORD": "saved"})["KAI_SMTP_PASSWORD"], "")
+        for change, message in [({"host": "https://smtp.x"}, "Host"), ({"security": "tls13"}, "keamanan"),
+                                ({"from": "bad"}, "pengirim"), ({"port": 0}, "Port"), ({"password": ""}, "password")]:
+            with self.subTest(change=change), self.assertRaisesRegex(settings.SettingsError, message):
+                settings.clean_smtp({**self.SMTP, **change}, {})
+        self.assertNotIn("smtp-secret", json.dumps(settings.public_smtp({**clean, "source": "ui"}, None)))
+        self.assertTrue(settings.public_smtp({**clean, "source": "ui"}, None)["secret_set"])
+
+    def test_send_mail_uses_starttls_login_and_maps_failures(self):
+        config = settings.clean_smtp(self.SMTP, {})
+        sent = []
+
+        class Client:
+            def __init__(self, host, port, timeout=None, context=None):
+                sent.append(("connect", host, port))
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def starttls(self, context=None):
+                sent.append(("starttls",))
+
+            def login(self, user, password):
+                sent.append(("login", user, password))
+
+            def send_message(self, message):
+                sent.append(("send", message["To"], message["Subject"], message["From"]))
+
+        with mock.patch.object(settings.smtplib, "SMTP", Client):
+            settings.send_mail(config, "budi@example.co.id", "Halo\r\nBcc: x@y.z", "isi")
+        self.assertEqual([step[0] for step in sent], ["connect", "starttls", "login", "send"])
+        self.assertNotIn("\n", sent[-1][2])
+        with self.assertRaisesRegex(settings.SettingsError, "tujuan"):
+            settings.send_mail(config, "bad\r\nBcc: x@y.z", "s", "t")
+
+        def refuse(*args, **kwargs):
+            raise settings.smtplib.SMTPAuthenticationError(535, b"no")
+        Client.login = refuse
+        with mock.patch.object(settings.smtplib, "SMTP", Client), self.assertRaisesRegex(settings.SettingsError, "menolak username"):
+            settings.send_mail(config, "budi@example.co.id", "s", "t")
+
+        def unsupported(*args, **kwargs):
+            raise settings.smtplib.SMTPNotSupportedError("no")
+        Client.login = unsupported
+        with mock.patch.object(settings.smtplib, "SMTP", Client), self.assertRaisesRegex(settings.SettingsError, "tidak memakai login"):
+            settings.send_mail(config, "budi@example.co.id", "s", "t")
+        Client.starttls = unsupported
+        with mock.patch.object(settings.smtplib, "SMTP", Client), self.assertRaisesRegex(settings.SettingsError, "STARTTLS"):
+            settings.send_mail(config, "budi@example.co.id", "s", "t")
+
+        def down(*args, **kwargs):
+            raise OSError("private network detail")
+        with mock.patch.object(settings.smtplib, "SMTP", down), self.assertRaises(settings.SettingsError) as caught:
+            settings.send_mail(config, "budi@example.co.id", "s", "t")
+        self.assertNotIn("private", str(caught.exception))
+
+    def test_mail_route_needs_token_and_configuration(self):
+        class MailRequest(Request):
+            def __init__(self, body, path, token="internal"):
+                super().__init__(body, "POST", token)
+                self.url = mock.Mock(path=path)
+
+        with mock.patch.dict(os.environ, {"KAI_PLATFORM_INTERNAL_TOKEN": "internal"}):
+            self.assertEqual(asyncio.run(settings.mail_request(MailRequest({"to": "a@b.co"}, "/v1/internal/mail", "wrong"))).status_code, 401)
+            with mock.patch.object(settings, "effective", lambda *a, **k: {"KAI_SMTP_HOST": ""}):
+                self.assertEqual(asyncio.run(settings.mail_request(MailRequest({"to": "a@b.co"}, "/v1/internal/integrations/smtp/test"))).status_code, 409)
+            calls = []
+            with mock.patch.object(settings, "effective", lambda *a, **k: {"KAI_SMTP_HOST": "smtp.x"}), \
+                    mock.patch.object(settings, "send_mail", lambda smtp, to, subject, text: calls.append((to, subject))):
+                ok = asyncio.run(settings.mail_request(MailRequest({"to": "a@b.co"}, "/v1/internal/integrations/smtp/test")))
+                self.assertEqual((ok.status_code, calls[-1]), (200, ("a@b.co", "Email uji K-AI")))
+                bad = asyncio.run(settings.mail_request(MailRequest({"to": "a@b.co"}, "/v1/internal/mail")))
+                self.assertEqual(bad.status_code, 400)
+
     def test_unknown_section_is_404(self):
         with mock.patch.dict(os.environ, {"KAI_PLATFORM_INTERNAL_TOKEN": "internal"}):
             request = Request()

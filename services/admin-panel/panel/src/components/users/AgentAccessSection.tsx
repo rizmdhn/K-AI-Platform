@@ -4,7 +4,7 @@ import { useCapabilities } from '@/hooks';
 import { SystemCapabilities } from '@/constants';
 import { accountSetupFn } from '@/server/kaiAccounts';
 import { agentAccessFn, assignAgentFn } from '@/server/kaiAgents';
-import { errorText } from './AccountFields';
+import { Notice, errorText } from './AccountFields';
 export function AgentAccessSection({ userId }: { userId: string }) {
   const { hasCapability } = useCapabilities();
   const client = useQueryClient();
@@ -20,13 +20,13 @@ export function AgentAccessSection({ userId }: { userId: string }) {
   return <section className="flex flex-col gap-3 border-t border-(--cui-color-stroke-default) pt-4" aria-label="Akses chatbot CH">
     <div className="flex items-center justify-between gap-2"><h3 className="font-medium">Akses chatbot CH</h3><Badge text={query.isPending ? 'Memuat' : query.isError ? 'Tidak tersedia' : accountDisabled ? 'Akun nonaktif' : hasAccess ? 'Diizinkan' : 'Belum diizinkan'} state={query.isError ? 'danger' : hasAccess ? 'success' : 'neutral'} /></div>
     <p className="text-sm text-(--cui-color-text-muted)">Chatbot umum selalu tersedia. Chatbot CH hanya muncul untuk pengguna yang diizinkan.</p>
-    {query.isPending ? <p role="status">Memuat akses chatbot CH…</p> : query.isError ? <p role="alert">Akses chatbot CH tidak tersedia. Coba muat ulang.</p> : status && <>
+    {query.isPending ? <p role="status" className="text-sm text-(--cui-color-text-muted)">Memuat akses chatbot CH…</p> : query.isError ? <Notice tone="error">Akses chatbot CH tidak tersedia. Coba muat ulang.</Notice> : status && <>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!status.direct_assignment} disabled={!canManage || !enabled || !status.configured || !status.agent || mutation.isPending || (status.direct_assignment && !status.can_remove_direct)} onChange={event => { if (status.agent) mutation.mutate({ agent_id: status.agent.id, assigned: event.target.checked }); }} />Izinkan memakai K-AI - CH</label>
       {!enabled && <p className="text-sm text-(--cui-color-text-muted)">{accountDisabled ? 'Akun nonaktif. Akses chatbot CH tidak dapat diaktifkan.' : 'Atur akses data ClickHouse terlebih dahulu.'}</p>}
       {(!status.configured || !status.agent) && <p className="text-sm">Chatbot CH belum tersedia. Hubungi pengelola.</p>}
       {status.inherited_access && <p className="text-sm">Akses juga berasal dari grup, role, atau kepemilikan. Menghapus penetapan langsung tidak mencabut akses tersebut.</p>}
       {status.direct_assignment && !status.can_remove_direct && <p className="text-sm">Izin ini tidak dapat dihapus dari panel ini. Hubungi pengelola.</p>}
     </>}
-    {mutation.isError && <p role="alert">{errorText(mutation.error, 'Akses chatbot CH gagal diubah. Coba lagi.')}</p>}
+    {mutation.isError && <Notice tone="error">{errorText(mutation.error, 'Akses chatbot CH gagal diubah. Coba lagi.')}</Notice>}
   </section>;
 }

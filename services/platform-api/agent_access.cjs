@@ -209,7 +209,7 @@ function createAgentAccess(deps) {
     await markCleanupPending(target.id, value);
   }
   async function cleanupContext(ctx) {
-    let complete = false;
+    let complete = false, reason = "";
     try {
       if (!ctx.agent) complete = true;
       else {
@@ -223,12 +223,24 @@ function createAgentAccess(deps) {
           if (result && Array.isArray(result.errors) && !result.errors.length) {
             const after = await snapshot(ctx);
             complete = !after.userEntries.length;
-          }
-        }
+            if (!complete) reason = "grant still present after revoke";
+          } else reason = "permission update returned errors";
+        } else reason = String(ctx.agent.author) === String(ctx.target.id) ? "user owns the managed agent" : "user has owner/editor grants, not only VIEW";
       }
-    } catch { complete = false; }
+    } catch (error) { complete = false; reason = `error ${error?.status ?? error?.name ?? ""}`; }
     await pending(ctx.target, !complete);
-    return {cleanup_complete: complete};
+    return {cleanup_complete: complete, ...(reason ? {reason} : {})};
+  }
+  /** True when the target authors a managed agent; such agents stop working once their owner is disabled or demoted. */
+  async function ownsManaged(req) {
+    const {target} = await agentContext({...req,headers:req.headers,body:{}}, false);
+    const specs = (await getConfig(target))?.modelSpecs?.list ?? [];
+    for (const spec of specs) {
+      if (!["kai-assistant", "kai-ch"].includes(spec?.name) || spec?.preset?.endpoint !== "agents" || typeof spec.preset.agent_id !== "string") continue;
+      const agent = await getAgent({id: spec.preset.agent_id, tenantId: tenant(target.tenantId)});
+      if (agent && String(agent.author) === String(target.id)) return true;
+    }
+    return false;
   }
   async function revokeManaged(req) {
     // Cleanup needs user administration authority, but must not depend on a live model or owner.
@@ -244,7 +256,7 @@ function createAgentAccess(deps) {
       if (error?.status === 403) throw fail(403);
       if (!ctx) throw fail(503);
       await pending(ctx.target,true);
-      return {cleanup_complete:false};
+      return {cleanup_complete:false,reason:"managed agent lookup failed"};
     }
   }
   async function guardNativeShare(req, res, next) {
@@ -260,6 +272,6 @@ function createAgentAccess(deps) {
       return res.status(error?.status === 403 ? 403 : 503).json({message:"Akses agent tidak tersedia."});
     }
   }
-  return { get: (req) => run(req, false), set: (req) => run(req, true), revokeManaged, guardNativeShare };
+  return { get: (req) => run(req, false), set: (req) => run(req, true), revokeManaged, ownsManaged, guardNativeShare };
 }
 module.exports = { createAgentAccess };

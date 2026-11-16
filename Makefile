@@ -9,7 +9,7 @@ $(error KAI_DOMAIN harus hostname atau alamat IPv4, tanpa https:// atau path)
 endif
 COMPOSE = docker compose --project-name kai --project-directory deploy --env-file .env -f deploy/upstream/docker-compose.yml -f deploy/docker-compose.override.yml $(MCP_OVERLAY) $(TLS_OVERLAY)
 
-.PHONY: setup preflight check up down logs ps test mcp-test mcp-image admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup warehouse-local-check warehouse-local-setup evals smoke-config browser-warehouse-test worker-test rag-acl-test openmetadata-check
+.PHONY: setup preflight check up down logs ps migrate test mcp-test mcp-image admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup warehouse-local-check warehouse-local-setup evals smoke-config browser-warehouse-test worker-test rag-acl-test openmetadata-check
 
 setup:
 	python3 scripts/bootstrap.py
@@ -38,6 +38,12 @@ admin-up: check
 # Prompts for email, name, username and password, so the password never lands in shell history.
 admin-create:
 	$(COMPOSE) exec api node config/create-user.js
+
+# Apply pending metadata migrations (db/migrate.sql only runs versions not yet recorded), after a backup.
+migrate: check
+	@echo "$(MCP_OVERLAY)" | grep -q metadata-local || (echo 'make migrate butuh KAI_LOCAL_METADATA_ENABLED=true. Untuk PostgreSQL eksternal, jalankan db/migrate.sql sebagai pemilik schema kai.' >&2; exit 1)
+	$(MAKE) backup
+	printf 'SET ROLE kai_migrator;\n\\i /migrations/migrate.sql\nSELECT version AS migrasi_terpasang FROM kai.schema_migrations ORDER BY version;\n' | $(COMPOSE) exec -T kai-metadata sh -ec 'export PGPASSWORD="$$POSTGRES_PASSWORD"; exec psql -X -q -h /var/run/postgresql -U postgres -d kai_metadata -v ON_ERROR_STOP=1'
 
 backup:
 	COMPOSE="$(COMPOSE)" bash scripts/backup.sh  # release archives drop the exec bit

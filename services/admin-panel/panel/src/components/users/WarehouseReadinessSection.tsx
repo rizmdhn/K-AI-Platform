@@ -2,6 +2,7 @@ import { Badge, Button } from '@clickhouse/click-ui';
 import { useQuery } from '@tanstack/react-query';
 import { warehouseReadinessFn } from '@/server/kaiAccounts';
 import { agentAccessFn } from '@/server/kaiAgents';
+import { Notice } from './AccountFields';
 const labels = { binding_dsn: 'Konfigurasi identitas akun', enrollment_dsn: 'Konfigurasi pengelolaan akses', distinct_runtime_users: 'Login layanan terpisah', keyring: 'Kunci enkripsi aktif', warehouse_target: 'Konfigurasi target HTTPS' };
 export function WarehouseReadinessSection({ userId }: { userId: string }) {
   const query = useQuery({ queryKey: ['kaiWarehouseReadiness', userId], queryFn: () => warehouseReadinessFn({ data: { id: userId } }), retry: false });
@@ -13,7 +14,7 @@ export function WarehouseReadinessSection({ userId }: { userId: string }) {
       <p className="text-(--cui-color-text-muted)">Informasi konfigurasi layanan dan chatbot untuk pengelola.</p>
       {agents.data?.agent && <><p>ID agent: <code>{agents.data.agent.id}</code></p><p>Provider: {agents.data.agent.provider}</p><p>Model: {agents.data.agent.model}</p><p>Tools: {agents.data.agent.tools.map(tool => tool.split('_mcp_')[0]).join(', ')}</p></>}
       <h4 className="font-medium">Konfigurasi layanan</h4>
-      {query.isPending ? <p role="status">Memeriksa konfigurasi lokal…</p> : query.isError ? <p role="alert">Status konfigurasi belum tersedia. Pengelola perlu memeriksa layanan.</p> : <ul>{Object.entries(labels).map(([name, label]) => <li key={name}>{label}: {query.data.checks[name as keyof typeof labels].ok ? 'tersedia' : 'perlu disiapkan'}</li>)}</ul>}
+      {query.isPending ? <p role="status" className="text-sm text-(--cui-color-text-muted)">Memeriksa konfigurasi lokal…</p> : query.isError ? <Notice tone="error">Status konfigurasi belum tersedia. Pengelola perlu memeriksa layanan.</Notice> : <ul>{Object.entries(labels).map(([name, label]) => <li key={name}>{label}: {query.data.checks[name as keyof typeof labels].ok ? 'tersedia' : 'perlu disiapkan'}</li>)}</ul>}
       <p className="text-xs text-(--cui-color-text-muted)">Pemeriksaan ini tidak menghubungi ClickHouse, PostgreSQL atau model. Konfigurasi tersedia belum membuktikan koneksi atau hak akses database.</p>
       <div><Button type="secondary" label="Periksa ulang konfigurasi" disabled={query.isFetching} onClick={() => void query.refetch()} /></div>
     </div>

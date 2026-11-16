@@ -37,6 +37,22 @@ function errorResponse(res, error) {
         : "Layanan akun sedang tidak tersedia. Coba lagi beberapa saat lagi.",
   });
 }
+// The link is always returned for manual sharing; with SMTP configured it is also mailed to the user.
+const MAIL_TEXT = {
+  activation: ["Aktivasi akun K-AI", "Administrator membuatkan akun K-AI untuk Anda. Buka tautan berikut untuk membuat password"],
+  reset: ["Reset password akun K-AI", "Administrator meminta reset password akun K-AI Anda. Buka tautan berikut untuk membuat password baru"],
+};
+function withMail(action, kind) {
+  return async (req) => {
+    const result = await action(req);
+    const id = result.account?.id ?? req.params.id;
+    const account = result.account?.email ? result.account : await accounts.read({ ...req, params: { id } });
+    const [subject, intro] = MAIL_TEXT[kind];
+    const until = new Date(result.expiresAt).toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short", timeZone: process.env.TZ || "Asia/Jakarta" });
+    const text = `Halo ${account.name || account.email},\n\n${intro} (sekali pakai, berlaku sampai ${until}):\n\n${result.activationUrl}\n\nPassword lama tetap berlaku sampai tautan dipakai. Jika Anda tidak merasa meminta ini, abaikan email ini dan hubungi administrator.\n`;
+    return { ...result, email: { to: account.email, ...(await integrations.mail(account.email, subject, kind === "activation" ? text.replace("Password lama tetap berlaku sampai tautan dipakai. ", "") : text)) } };
+  };
+}
 function installAdmin(router) {
   const handle = (action) => async (req, res) => {
     res.set("Cache-Control", "no-store");
@@ -48,6 +64,7 @@ function installAdmin(router) {
   };
   router.get("/kai-problems", handle(problems.list));
   router.post("/kai-integrations/openmetadata/test", handle(integrations.test));
+  router.post("/kai-integrations/smtp/test", handle(integrations.testSmtp));
   router.get("/kai-integrations/openmetadata/databases", handle(integrations.databases));
   router.get("/kai-integrations/:name", handle(integrations.get));
   router.put("/kai-integrations/:name", handle(integrations.save));
@@ -78,13 +95,16 @@ function installAdmin(router) {
   router.post("/:id/kai-warehouse/save", handle(warehouseActions.save));
   router.post("/:id/kai-warehouse/credentials", handle(warehouse.credentials));
   router.delete("/:id/kai-warehouse", handle(warehouseActions.revoke));
+  router.post("/:id/kai-warehouse/release", handle(warehouseActions.release));
+  router.post("/:id/kai-warehouse/check/connection", handle(warehouse.checkConnection));
+  router.post("/:id/kai-warehouse/check/credentials", handle(warehouse.checkCredentials));
   router.post("/:id/kai-disable", handle(warehouseActions.disable));
-  router.post("/", handle(accounts.create));
+  router.post("/", handle(withMail(accounts.create, "activation")));
   router.get("/:id/kai-account", handle(accounts.read));
   router.patch("/:id/kai-account", handle(warehouseActions.updateReference));
-  router.post("/:id/kai-activation", handle(accounts.reissue));
-  router.post("/:id/kai-password-reset", handle(accounts.resetLink));
-  router.patch("/:id/kai-role", handle(accounts.setRole));
+  router.post("/:id/kai-activation", handle(withMail(accounts.reissue, "activation")));
+  router.post("/:id/kai-password-reset", handle(withMail(accounts.resetLink, "reset")));
+  router.patch("/:id/kai-role", handle(warehouseActions.setRole));
   router.patch("/:id/kai-profile", handle(accounts.updateProfile));
 }
 function page(res, message = "", success = false, status = 200) {

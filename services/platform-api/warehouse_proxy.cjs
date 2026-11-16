@@ -53,7 +53,7 @@ function createWarehouseProxy({ accounts, fetchImpl = fetch }) {
     const allowed =
       action === "credentials"
         ? ["password"]
-        : [];
+        : action === "check/credentials" ? ["username", "password"] : [];
     if (write) fields(req.body, allowed);
     if (
       action === "credentials" &&
@@ -64,7 +64,7 @@ function createWarehouseProxy({ accounts, fetchImpl = fetch }) {
     )
       throw new AccountError("Password ClickHouse wajib diisi (maksimal 4096 byte).");
     // Reuse the native, fresh capability/tenant check without forwarding secret request fields to context.
-    if (action === "revoke") await accounts.warehouseRevocationContext({ ...req, headers:req.headers, body:{} });
+    if (["revoke", "release"].includes(action)) await accounts.warehouseRevocationContext({ ...req, headers:req.headers, body:{} });
     else await accounts.warehouseContext({ ...req, headers:req.headers, body: {} }, write);
     const bearer = req.headers?.authorization;
     if (typeof bearer !== "string" || !/^Bearer [^\s]+$/.test(bearer))
@@ -112,6 +112,10 @@ function createWarehouseProxy({ accounts, fetchImpl = fetch }) {
         chunks.push(Buffer.from(value));
       }
       const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      if (action.startsWith("check/")) {
+        if (typeof value?.ok !== "boolean" || typeof value.message !== "string") throw unavailable();
+        return { ok: value.ok, message: value.message.slice(0, 500) };
+      }
       return action === "readiness" ? readinessDto(value) : action === "eligibility" ? eligibilityDto(value) : statusDto(value);
     } catch (error) {
       if (error instanceof AccountError) throw error;
@@ -120,12 +124,17 @@ function createWarehouseProxy({ accounts, fetchImpl = fetch }) {
       clearTimeout(timer);
     }
   }
-  return Object.fromEntries(
-    ["status", "prepare", "credentials", "revoke", "readiness", "eligibility"].map((action) => [
-      action,
-      (req) => call(req, action),
-    ]),
-  );
+  return {
+    ...Object.fromEntries(
+      ["status", "prepare", "credentials", "revoke", "release", "readiness", "eligibility"].map((action) => [
+        action,
+        (req) => call(req, action),
+      ]),
+    ),
+    // Tests that store nothing; the result ({ok, message}) is shown to the admin as is.
+    checkConnection: (req) => call(req, "check/connection"),
+    checkCredentials: (req) => call(req, "check/credentials"),
+  };
 }
 function readinessDto(value) {
   if (value?.version !== 2 || value.scope !== 'local_configuration_only' || value.database_verified !== false || value.cloud_verified !== false) throw unavailable();

@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type * as t from '@/types';
 import { FormDialog } from '@/components/shared';
 import { provisionUserFn } from '@/server/kaiAccounts';
-import { ActivationLink, errorText, inputClass } from './AccountFields';
+import { ActivationLink, Select, errorText, inputClass } from './AccountFields';
 export function CreateUserDialog({ open, onClose }: t.CreateUserDialogProps) {
   const { user } = useRouteContext({ from: '/_app' });
   const queryClient = useQueryClient();
@@ -19,7 +19,7 @@ export function CreateUserDialog({ open, onClose }: t.CreateUserDialogProps) {
     </> : <>
       <label className="text-sm">Nama<input autoFocus className={inputClass} value={name} onChange={e => setName(e.target.value)} required maxLength={200} autoComplete="off" /></label>
       <label className="text-sm">Email<input type="email" className={inputClass} value={email} onChange={e => setEmail(e.target.value)} required maxLength={254} autoComplete="off" /></label>
-      <label className="text-sm">Role platform<select className={inputClass} value={role} onChange={e => setRole(e.target.value as 'USER' | 'ADMIN')}><option value="USER">USER</option>{user?.role === 'ADMIN' && <option value="ADMIN">ADMIN</option>}</select></label>
+      <label className="flex flex-col gap-1 text-sm">Role platform<Select value={role} onChange={e => setRole(e.target.value as 'USER' | 'ADMIN')}><option value="USER">USER</option>{user?.role === 'ADMIN' && <option value="ADMIN">ADMIN</option>}</Select></label>
     </>}
   </FormDialog>;
 }

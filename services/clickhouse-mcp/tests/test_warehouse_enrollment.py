@@ -90,7 +90,7 @@ class EnrollmentHTTPTests(unittest.IsolatedAsyncioTestCase):
                 return lambda endpoint:endpoint
         self.api.register_warehouse_routes(Registry())
         self.assertEqual({path.rsplit('/',1)[-1] for path,_ in routes},
-                         {'{subject}','prepare','credentials','eligibility'})
+                         {'{subject}','prepare','credentials','release','eligibility','connection'})
 
     async def test_native_identity_and_reference_changes_before_and_after_verification_deny_save(self):
         for key,value in (('actor_id','c'*24),('target_id','c'*24),('status','existing'),
@@ -197,6 +197,59 @@ class EnrollmentHTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code,200)
         self.assertFalse(response.json()['credentials_saved'])
         revoke.assert_awaited_once();verify.assert_not_awaited()
+
+
+
+
+async def _release_test(self):
+    self.context['status'] = 'disabled'
+    released = dict(self.status, state='revoked', credentials_saved=False)
+    with mock.patch.object(self.api.store, 'release', mock.AsyncMock(return_value=released)) as release:
+        response, _, prepare, save, revoke, verify = await self.request('/release', 'POST', {})
+    self.assertEqual(response.status_code, 200)
+    self.assertEqual(response.json()['state'], 'revoked')
+    release.assert_awaited_once()
+    for untouched in (prepare, save, revoke, verify):
+        untouched.assert_not_awaited()
+    with mock.patch.object(self.api.store, 'release', mock.AsyncMock()) as release:
+        response, *_ = await self.request('/release', 'POST', {'password': 'x'})
+    self.assertEqual(response.status_code, 400)
+    release.assert_not_awaited()
+
+
+EnrollmentHTTPTests.test_release_uses_revocation_context_and_never_verifies = _release_test
+
+
+async def _check(self, path, body, ping=None, verify=None):
+    app = Starlette(routes=[Route('/v1/admin/warehouse-users/{subject}/check/' + path, self.api.warehouse_check, methods=['POST'])])
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://fixture') as client:
+        with mock.patch.object(self.api, 'native_context', mock.AsyncMock(return_value=self.context)), \
+             mock.patch.object(self.api, 'ping_clickhouse', ping or mock.AsyncMock()) as p, \
+             mock.patch.object(self.api, 'verify_clickhouse', verify or mock.AsyncMock()) as v, \
+             mock.patch.object(self.api.store, 'save', mock.AsyncMock()) as save, \
+             mock.patch.object(self.api.store, 'prepare', mock.AsyncMock()) as prepare:
+            response = await client.post('/v1/admin/warehouse-users/' + 'b' * 24 + '/check/' + path, json=body, headers={'Authorization': 'Bearer fixture'})
+    save.assert_not_awaited(); prepare.assert_not_awaited()
+    return response, p, v
+
+
+async def _checks_store_nothing(self):
+    response, ping, verify = await _check(self, 'connection', {})
+    self.assertEqual((response.status_code, response.json()['ok']), (200, True)); ping.assert_awaited_once(); verify.assert_not_awaited()
+    response, ping, verify = await _check(self, 'credentials', {'username': 'other_ro', 'password': 'fixture-private'})
+    self.assertTrue(response.json()['ok']); verify.assert_awaited_once_with('other_ro', 'fixture-private', mock.ANY)
+    self.assertNotIn('fixture-private', response.text)
+    rejected = mock.AsyncMock(side_effect=self.api.ApprovalError(400, 'ClickHouse login or access was rejected.'))
+    response, _, _ = await _check(self, 'credentials', {'username': 'x', 'password': 'y'}, verify=rejected)
+    self.assertEqual((response.status_code, response.json()), (200, {'ok': False, 'message': 'ClickHouse menolak username atau password.'}))
+    unreachable = mock.AsyncMock(side_effect=self.api.ApprovalError(400, 'Server ClickHouse tidak bisa dihubungi dari server K-AI.'))
+    response, _, _ = await _check(self, 'connection', {}, ping=unreachable)
+    self.assertFalse(response.json()['ok'])
+    response, _, verify = await _check(self, 'credentials', {'username': 'x', 'password': 'y', 'server': 'evil'})
+    self.assertFalse(response.json()['ok']); verify.assert_not_awaited()
+
+
+EnrollmentHTTPTests.test_connection_and_credential_checks_store_nothing = _checks_store_nothing
 
 
 if __name__=='__main__':unittest.main()

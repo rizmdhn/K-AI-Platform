@@ -4,12 +4,17 @@ Sections (one row each in kai.integration_settings, kai_catalog role, KAI_CATALO
   openmetadata  OpenMetadata connection + catalog draft worker (bot token secret)
   batch_model   model for bulk row labelling and metadata drafts (API key secret)
   limits        ClickHouse query ceilings + audit log retention
+  smtp          outgoing mail for activation / password reset links (password secret)
 Secrets are AES-256-GCM encrypted with the binding keyring and never returned: the panel only learns whether
 one is saved. Values are exposed as an env-style dict, so code reads UI and .env values the same way.
 Internal routes take the platform internal token only.
 """
 
 import asyncio
+import smtplib
+import ssl
+from email.message import EmailMessage
+from email.utils import formataddr
 import hmac
 import json
 import os
@@ -271,6 +276,79 @@ def public_limits(settings, row):
         field: limit(settings, key) // unit for field, (key, unit, *_rest) in LIMIT_FORM.items()}}
 
 
+EMAIL = re.compile(r"[^@\s<>\"',;]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}")
+HOST = re.compile(r"[A-Za-z0-9.-]{1,253}")
+SMTP_SECURITY = ("starttls", "ssl", "none")
+
+
+def clean_smtp(body, current):
+    """SMTP form: host empty = mail off. Empty password keeps the saved one."""
+    if not isinstance(body, dict):
+        raise SettingsError("Isian tidak valid.")
+    text = lambda key, limit: (body.get(key) if isinstance(body.get(key), str) else "").strip()[:limit]
+    host, user, sender = text("host", 253), text("username", 320), text("from", 320)
+    name = re.sub(r"[\r\n]", " ", text("from_name", 100))
+    security = text("security", 10) or "starttls"
+    password = text("password", 1024) or current.get("KAI_SMTP_PASSWORD", "")
+    if host:
+        if not HOST.fullmatch(host):
+            raise SettingsError("Host SMTP hanya nama server, mis. smtp.perusahaan.co.id (tanpa https:// atau port).")
+        if security not in SMTP_SECURITY:
+            raise SettingsError("Pilih keamanan koneksi: starttls, ssl, atau none.")
+        if not EMAIL.fullmatch(sender):
+            raise SettingsError("Isi alamat pengirim yang valid, mis. no-reply@perusahaan.co.id.")
+        if user and not password:
+            raise SettingsError("Isi password SMTP untuk username tersebut.")
+    port = _int(body.get("port", 465 if security == "ssl" else 587), 1, 65535, "Port SMTP")
+    return {"KAI_SMTP_HOST": host, "KAI_SMTP_PORT": str(port), "KAI_SMTP_SECURITY": security, "KAI_SMTP_USERNAME": user,
+            "KAI_SMTP_PASSWORD": password if host and user else "", "KAI_SMTP_FROM": sender, "KAI_SMTP_FROM_NAME": name}
+
+
+def public_smtp(settings, row):
+    return {**_meta(settings, row, bool(settings["KAI_SMTP_PASSWORD"])), "settings": {
+        "host": settings["KAI_SMTP_HOST"], "port": _number(settings["KAI_SMTP_PORT"], 587),
+        "security": settings["KAI_SMTP_SECURITY"] or "starttls", "username": settings["KAI_SMTP_USERNAME"],
+        "from": settings["KAI_SMTP_FROM"], "from_name": settings["KAI_SMTP_FROM_NAME"]}}
+
+
+def send_mail(settings, to, subject, text, timeout=15):
+    """Send one plain-text mail with the saved SMTP settings. Raises SettingsError with an admin-safe reason."""
+    host = settings.get("KAI_SMTP_HOST", "")
+    if not host:
+        raise SettingsError("SMTP belum dikonfigurasi.")
+    if not isinstance(to, str) or not EMAIL.fullmatch(to):
+        raise SettingsError("Alamat email tujuan tidak valid.")
+    message = EmailMessage()
+    message["From"] = formataddr((settings.get("KAI_SMTP_FROM_NAME") or "K-AI", settings["KAI_SMTP_FROM"]))
+    message["To"], message["Subject"] = to, re.sub(r"[\r\n]", " ", subject)[:200]
+    message.set_content(text[:20000])
+    port, security, context = _number(settings.get("KAI_SMTP_PORT"), 587), settings.get("KAI_SMTP_SECURITY") or "starttls", ssl.create_default_context()
+    try:
+        client = smtplib.SMTP_SSL(host, port, timeout=timeout, context=context) if security == "ssl" else smtplib.SMTP(host, port, timeout=timeout)
+        with client:
+            if security == "starttls":
+                try:
+                    client.starttls(context=context)
+                except smtplib.SMTPNotSupportedError:
+                    raise SettingsError("Server SMTP tidak mendukung STARTTLS. Pilih SSL/TLS (port 465), atau tanpa enkripsi untuk relay internal.") from None
+            if settings.get("KAI_SMTP_USERNAME"):
+                try:
+                    client.login(settings["KAI_SMTP_USERNAME"], settings.get("KAI_SMTP_PASSWORD", ""))
+                except smtplib.SMTPNotSupportedError:
+                    raise SettingsError("Server SMTP ini tidak memakai login. Kosongkan username dan password.") from None
+            client.send_message(message)
+    except smtplib.SMTPAuthenticationError:
+        raise SettingsError("Server SMTP menolak username atau password.") from None
+    except smtplib.SMTPRecipientsRefused:
+        raise SettingsError("Server SMTP menolak alamat tujuan.") from None
+    except smtplib.SMTPSenderRefused:
+        raise SettingsError("Server SMTP menolak alamat pengirim. Pakai alamat yang diizinkan akun SMTP ini.") from None
+    except ssl.SSLError:
+        raise SettingsError("Koneksi aman gagal. Periksa pilihan keamanan (starttls untuk port 587, ssl untuk 465).") from None
+    except (OSError, smtplib.SMTPException):
+        raise SettingsError("Server SMTP tidak bisa dihubungi. Periksa host, port, dan izin jaringan keluar server.") from None
+
+
 SECTIONS = {
     NAME: {"fields": FIELDS, "secret": SECRET, "marker": "KAI_OPENMETADATA_URL", "clean": clean, "public": public},
     "batch_model": {"fields": ("KAI_BATCH_ENABLED", "KAI_BATCH_MODEL_BASE_URL", "KAI_BATCH_MODEL", "KAI_BATCH_MODEL_API_KEY",
@@ -279,6 +357,9 @@ SECTIONS = {
                     "public": public_batch},
     "limits": {"fields": tuple(LIMIT_DEFAULTS), "secret": None, "marker": None, "clean": clean_limits,
                "public": public_limits},
+    "smtp": {"fields": ("KAI_SMTP_HOST", "KAI_SMTP_PORT", "KAI_SMTP_SECURITY", "KAI_SMTP_USERNAME", "KAI_SMTP_PASSWORD",
+                        "KAI_SMTP_FROM", "KAI_SMTP_FROM_NAME"),
+             "secret": "KAI_SMTP_PASSWORD", "marker": "KAI_SMTP_HOST", "clean": clean_smtp, "public": public_smtp},
 }
 
 
@@ -356,7 +437,34 @@ async def databases_request(request):
         return JSONResponse({"message": "Daftar database dari OpenMetadata tidak bisa dibaca."}, status_code=503)
 
 
+async def mail_request(request):
+    """Internal mail: the platform API sends activation/reset links. 'test' only takes a recipient."""
+    if not _authorized(request):
+        return JSONResponse({"message": "Unauthorized."}, status_code=401)
+    try:
+        body = await _body(request)
+        if not isinstance(body, dict):
+            raise SettingsError("Isian tidak valid.")
+        smtp = await asyncio.to_thread(effective, os.environ, False, "smtp")
+        if not smtp["KAI_SMTP_HOST"]:
+            return JSONResponse({"message": "SMTP belum dikonfigurasi."}, status_code=409)
+        if request.url.path.endswith("/test"):
+            subject, text = "Email uji K-AI", "Email ini dikirim dari Admin Panel K-AI untuk menguji pengaturan SMTP. Tidak perlu dibalas."
+        else:
+            subject, text = body.get("subject"), body.get("text")
+            if not isinstance(subject, str) or not isinstance(text, str) or not subject.strip() or not text.strip():
+                raise SettingsError("Isian tidak valid.")
+        await asyncio.to_thread(send_mail, smtp, body.get("to"), subject, text)
+        return JSONResponse({"sent": True}, headers={"Cache-Control": "no-store"})
+    except SettingsError as error:
+        return JSONResponse({"message": str(error)}, status_code=400)
+    except Exception:
+        return JSONResponse({"message": "Email tidak bisa dikirim."}, status_code=503)
+
+
 def register_integration_routes(mcp):
+    mcp.custom_route("/v1/internal/integrations/smtp/test", methods=["POST"])(mail_request)
+    mcp.custom_route("/v1/internal/mail", methods=["POST"])(mail_request)
     mcp.custom_route("/v1/internal/integrations/openmetadata/test", methods=["POST"])(test_request)
     mcp.custom_route("/v1/internal/integrations/openmetadata/databases", methods=["GET"])(databases_request)
     mcp.custom_route("/v1/internal/integrations/{name}", methods=["GET", "PUT"])(settings_request)

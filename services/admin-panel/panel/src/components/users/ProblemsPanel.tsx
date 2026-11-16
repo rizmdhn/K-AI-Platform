@@ -2,6 +2,7 @@ import { Badge, Button } from '@clickhouse/click-ui';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { problemsFn, type Problems } from '@/server/kaiAccounts';
+import { Notice } from './AccountFields';
 type Issue = Problems['accounts'][number]['issues'][number];
 type SystemIssue = Problems['system'][number];
 const time = (at?: string) => (at ? new Date(at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) : '');
@@ -38,7 +39,7 @@ export function ProblemsPanel() {
       <h2 className="font-medium">Perlu perhatian <Badge text={query.isPending ? 'Memuat' : query.isError ? 'Tidak tersedia' : String(total)} state={total ? 'warning' : 'neutral'} /></h2>
       <Button type="secondary" label="Periksa ulang" disabled={query.isFetching} onClick={() => void query.refetch()} />
     </div>
-    {query.isError && <p role="alert" className="mt-2 text-sm">Daftar masalah belum tersedia.</p>}
+    {query.isError && <div className="mt-2"><Notice tone="error">Daftar masalah belum tersedia.</Notice></div>}
     {data && !total && <p className="mt-2 text-sm text-(--cui-color-text-muted)">Tidak ada masalah terdeteksi dalam 24 jam terakhir.</p>}
     {data && total > 0 && <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm">
       <thead className="text-xs text-(--cui-color-text-muted)"><tr><th className="py-2 pr-4 font-medium">Pengguna</th><th className="py-2 pr-4 font-medium">Masalah</th><th className="py-2 font-medium">Cara memperbaiki</th></tr></thead>

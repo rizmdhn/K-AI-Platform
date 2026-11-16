@@ -125,7 +125,7 @@ async function main() {
       "invalid",
       "irrelevant-password",
     );
-    assert.equal(reset.message, "Account activation required");
+    assert.equal(reset.message, "Account unavailable"); // install_account_security.mjs blocks every non-active account
     step = "pending guard and privacy";
     const testBearer = jwt.sign({ id: userId }, process.env.JWT_SECRET, {
       expiresIn: "5m",

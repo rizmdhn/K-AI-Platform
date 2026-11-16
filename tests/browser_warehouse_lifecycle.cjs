@@ -53,7 +53,7 @@ let step = "setup", panelRef;
       const field = w.getByLabel("Username ClickHouse");
       if (await field.isEditable()) await field.fill(username);
       await w.getByLabel("Password ClickHouse").fill(password);
-      await w.getByRole("button", { name: /Simpan dan uji koneksi|Ganti password/ }).click();
+      await w.getByRole("button", { name: /Simpan kredensial|Ganti password/ }).click();
     };
     const chatSees = async (user) => {
       const page = await (await browser.newContext()).newPage();

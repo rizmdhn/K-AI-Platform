@@ -1,7 +1,10 @@
 const { AccountError } = require('./accounts.cjs');
 function createWarehouseActions({accounts,warehouse,agents}) {
   const empty=req=>({...req,headers:req.headers,body:{}});
-  async function cleanup(req) {try{return (await agents.revokeManaged(empty(req))).cleanup_complete===true;}catch{return false;}}
+  async function cleanup(req) {try{return await agents.revokeManaged(empty(req));}catch(error){return{cleanup_complete:false,reason:`error ${error?.status??''}`};}}
+  const OWNER='Akun ini pemilik chatbot K-AI. Pindahkan kepemilikan ke ADMIN lain dulu (make agents-setup AGENT_OWNER_ID=<ID ADMIN lain>), lalu ulangi.';
+  // Lookup failure never blocks a disable: losing the chatbot is better than keeping a compromised account.
+  const ownsAgent=req=>agents.ownsManaged?agents.ownsManaged(empty(req)).catch(()=>false):false;
   async function save(req) {
     const data=req.body;
     if(!data||Object.keys(data).sort().join(',')!=='password,username'||typeof data.username!=='string'||!data.username||data.username!==data.username.trim()||Buffer.byteLength(data.username)>1024||/[\x00-\x1f\x7f]/.test(data.username)||typeof data.password!=='string'||!data.password||Buffer.byteLength(data.password)>4096||data.password.includes('\0'))throw new AccountError('Periksa username dan password ClickHouse.',400);
@@ -22,9 +25,10 @@ function createWarehouseActions({accounts,warehouse,agents}) {
     let result;
     try { result=await warehouse.revoke(req); }
     catch(error) { await cleanup(req);throw error; }
-    return {...result,cleanup_complete:await cleanup(req)};
+    return {...result,cleanup_complete:(await cleanup(req)).cleanup_complete===true};
   }
   async function disable(req) {
+    if(await ownsAgent(req))throw new AccountError(OWNER,409);
     const result=await accounts.disable(req);
     let account=result.account, revoked=false, reason='';
     try {
@@ -36,8 +40,8 @@ function createWarehouseActions({accounts,warehouse,agents}) {
     } catch(error) { reason=`HTTP ${error?.status??'-'} ${error?.message??''}`; /* Disabled remains authoritative; pending is cleared only after durable revocation. */ }
     // Status and our own Indonesian message only (never upstream bodies), so operators can see why the retry is needed.
     if(reason) console.warn(`[kai] disable ${req.params?.id}: ClickHouse revocation incomplete (${reason})`);
-    const acl=await cleanup(req);
-    if(!acl) console.warn(`[kai] disable ${req.params?.id}: chatbot permission cleanup incomplete`);
+    const aclResult=await cleanup(req), acl=aclResult.cleanup_complete===true;
+    if(!acl) console.warn(`[kai] disable ${req.params?.id}: chatbot permission cleanup incomplete (${aclResult.reason??'unknown'})`);
     return {account,cleanup_complete:result.cleanup_complete&&revoked&&acl,cleanup:{sessions:result.cleanup_complete,warehouse:revoked,chatbot:acl}};
   }
   async function updateReference(req) {
@@ -45,6 +49,21 @@ function createWarehouseActions({accounts,warehouse,agents}) {
     if(JSON.stringify(before.warehouse)!==JSON.stringify(after.warehouse))await cleanup(req);
     return after;
   }
-  return {save,revoke,disable,updateReference};
+  async function release(req) {
+    // SQL only releases a revoked binding; the platform reference is cleared afterwards so the Mongo unique index frees too.
+    let result;
+    try { result=await warehouse.release(empty(req)); }
+    catch(error) {
+      if(error?.status===409)throw new AccountError('Akun ClickHouse hanya bisa dilepas setelah aksesnya dicabut. Cabut akses dulu.',409);
+      throw error;
+    }
+    await accounts.update({...req,headers:req.headers,body:{warehouse:null}});
+    return {...result,released:true};
+  }
+  async function setRole(req) {
+    if(req.body?.role==='USER'&&await ownsAgent(req))throw new AccountError(OWNER,409);
+    return accounts.setRole(req);
+  }
+  return {save,revoke,release,disable,updateReference,setRole};
 }
 module.exports={createWarehouseActions};

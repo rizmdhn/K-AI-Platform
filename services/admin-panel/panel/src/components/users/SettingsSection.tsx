@@ -6,18 +6,18 @@ import { useCapabilities } from '@/hooks';
 import { SystemCapabilities } from '@/constants';
 import { saveSettingsSectionFn, settingsSectionFn } from '@/server/kaiAccounts';
 import type { SectionState, SettingsSectionName } from '@/server/kaiAccounts';
-import { inputClass } from './AccountFields';
-export interface Field { key: string; label: string; type: 'text' | 'secret' | 'number' | 'checkbox'; min?: number; max?: number; placeholder?: string; help?: string }
+import { Notice, Select, inputClass } from './AccountFields';
+export interface Field { key: string; label: string; type: 'text' | 'secret' | 'number' | 'checkbox' | 'select'; min?: number; max?: number; placeholder?: string; help?: string; options?: { value: string; label: string }[] }
 type Values = SectionState['settings'];
 const sources = { ui: 'Diatur di Admin Panel', env: 'Dari .env / bawaan', none: 'Belum diatur' };
 // One settings card (batch model, limits): load, edit, save. The secret field is write-only; empty keeps the saved one.
-export function SettingsSection({ name, title, description, fields }: { name: SettingsSectionName; title: string; description: ReactNode; fields: Field[] }) {
+export function SettingsSection({ name, title, description, fields, children }: { name: SettingsSectionName; title: string; description: ReactNode; fields: Field[]; children?: ReactNode }) {
   const { hasCapability } = useCapabilities();
   const canManage = hasCapability(SystemCapabilities.MANAGE_CONFIGS);
   const client = useQueryClient();
   const query = useQuery({ queryKey: ['kaiSettings', name], queryFn: () => settingsSectionFn({ data: { name } }), retry: false });
   const [form, setForm] = useState<Values>({}), [secret, setSecret] = useState('');
-  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [open, setOpen] = useState(false);
   useEffect(() => { if (query.data) setForm(query.data.settings); }, [query.data]);
   const data = query.data;
   const disabled = busy || !canManage || !data?.storage_available;
@@ -37,11 +37,14 @@ export function SettingsSection({ name, title, description, fields }: { name: Se
   }
   const label = query.isPending ? 'Memuat' : query.isError ? 'Tidak tersedia' : sources[data!.source];
   return <section aria-label={title} className="rounded-lg border border-(--cui-color-stroke-default) p-4">
-    <h2 className="font-medium">{title} <Badge text={label} state={query.isError ? 'danger' : data?.source === 'ui' ? 'success' : 'neutral'} /></h2>
-    <div className="mt-2 text-sm text-(--cui-color-text-muted)">{description}</div>
-    {query.isError && <p role="alert" className="mt-2 text-sm">Pengaturan tidak bisa dibaca.</p>}
-    {data && <form className="mt-3 flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); void save(); }}>
-      {!data.storage_available && <p role="alert" className="text-sm">Penyimpanan pengaturan belum disiapkan di server (jalankan make warehouse-local-setup). Sampai itu, nilai dibaca dari .env.</p>}
+    <div className="flex items-center justify-between gap-2">
+      <h2 className="font-medium">{title} <Badge text={label} state={query.isError ? 'danger' : data?.source === 'ui' ? 'success' : 'neutral'} /></h2>
+      <Button type="secondary" label={open ? 'Tutup' : 'Atur'} aria-expanded={open} onClick={() => setOpen(!open)} />
+    </div>
+    {open && <div className="mt-2 text-sm text-(--cui-color-text-muted)">{description}</div>}
+    {query.isError && <div className="mt-2"><Notice tone="error">Pengaturan tidak bisa dibaca.</Notice></div>}
+    {open && data && <form className="mt-3 flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+      {!data.storage_available && <Notice tone="warning">Penyimpanan pengaturan belum disiapkan di server (jalankan make warehouse-local-setup). Sampai itu, nilai dibaca dari .env.</Notice>}
       {!canManage && <p className="text-sm">Anda hanya bisa melihat. Perubahan butuh izin kelola konfigurasi.</p>}
       <div className="flex flex-wrap gap-3">
         {fields.map((f) => f.type === 'checkbox'
@@ -50,6 +53,8 @@ export function SettingsSection({ name, title, description, fields }: { name: Se
           : <label key={f.key} className={`flex flex-col gap-1 text-sm ${f.type === 'number' ? '' : 'w-full'}`}>{f.label}
               {f.type === 'secret'
                 ? <input className={inputClass} type="password" autoComplete="new-password" value={secret} disabled={disabled} maxLength={8192} placeholder={data.secret_set ? 'Tersimpan. Kosongkan untuk mempertahankan' : f.placeholder} onChange={(e) => setSecret(e.target.value)} />
+                : f.type === 'select'
+                  ? <Select value={String(form[f.key] ?? '')} disabled={disabled} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}>{f.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</Select>
                 : f.type === 'number'
                   ? <input className={inputClass} type="number" min={f.min} max={f.max} value={Number(form[f.key] ?? 0)} disabled={disabled} onChange={(e) => setForm({ ...form, [f.key]: Number(e.target.value) })} />
                   : <input className={inputClass} value={String(form[f.key] ?? '')} disabled={disabled} maxLength={2048} placeholder={f.placeholder} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} />}
@@ -57,9 +62,10 @@ export function SettingsSection({ name, title, description, fields }: { name: Se
             </label>)}
       </div>
       {canManage && <div><Button type="primary" htmlType="submit" label="Simpan" disabled={disabled} /></div>}
-      {notice && <p role="status" className="text-sm">{notice}</p>}
-      {error && <p role="alert" className="text-sm">{error}</p>}
+      {notice && <Notice tone="success">{notice}</Notice>}
+      {error && <Notice tone="error">{error}</Notice>}
       {data.updated_at && <p className="text-xs text-(--cui-color-text-muted)">Terakhir diubah {new Date(data.updated_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}.</p>}
     </form>}
+    {open && data && children}
   </section>;
 }

@@ -7,7 +7,7 @@ export interface AccountSetup {
   id: string; status: 'pending' | 'active' | 'existing' | 'disabled'; role: 'USER' | 'ADMIN'; name: string; email: string; expiresAt?: string; warehouse_revocation_pending?: boolean; chatbot_cleanup_pending?: boolean;
   warehouse: { service: string; username: string; status: 'unverified' } | null;
 }
-export interface Invitation { activationUrl: string; expiresAt: string }
+export interface Invitation { activationUrl: string; expiresAt: string; email?: { to: string; sent: boolean; configured?: boolean; message?: string } }
 const warehouse = z.object({ service: z.string().min(1).max(253), username: z.string().min(1).max(1024), confirmed: z.literal(true) }).strict().nullable();
 const id = z.string().regex(/^[a-f0-9]{24}$/);
 async function call<T>(url: string, capability: string, method = 'GET', body?: unknown): Promise<T> {
@@ -50,6 +50,13 @@ export const warehouseAccessFn = createServerFn({ method: 'GET' }).inputValidato
   .handler(async ({ data }): Promise<WarehouseAccess> => call(`/api/admin/users/${data.id}/kai-warehouse`, SystemCapabilities.READ_USERS));
 export const saveWarehouseCredentialsFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id, username: z.string().trim().min(1).max(1024), password: z.string().min(1).max(4096).refine(value => !value.includes('\0') && new TextEncoder().encode(value).length <= 4096) }).strict())
   .handler(async ({ data }): Promise<WarehouseAccess> => call(`/api/admin/users/${data.id}/kai-warehouse/save`, SystemCapabilities.MANAGE_USERS, 'POST', { username: data.username, password: data.password }));
+export interface WarehouseCheck { ok: boolean; message: string }
+export const checkConnectionFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id }).strict())
+  .handler(async ({ data }): Promise<WarehouseCheck> => call(`/api/admin/users/${data.id}/kai-warehouse/check/connection`, SystemCapabilities.MANAGE_USERS, 'POST', {}));
+export const checkCredentialsFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id, username: z.string().trim().min(1).max(1024), password: z.string().min(1).max(4096) }).strict())
+  .handler(async ({ data }): Promise<WarehouseCheck> => call(`/api/admin/users/${data.id}/kai-warehouse/check/credentials`, SystemCapabilities.MANAGE_USERS, 'POST', { username: data.username, password: data.password }));
+export const releaseWarehouseFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id }).strict())
+  .handler(async ({ data }): Promise<WarehouseAccess> => call(`/api/admin/users/${data.id}/kai-warehouse/release`, SystemCapabilities.MANAGE_USERS, 'POST', {}));
 export const revokeWarehouseFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id }).strict())
   .handler(async ({ data }): Promise<WarehouseAccess> => call(`/api/admin/users/${data.id}/kai-warehouse`, SystemCapabilities.MANAGE_USERS, 'DELETE', {}));
 
@@ -92,12 +99,12 @@ export const testOpenMetadataFn = createServerFn({ method: 'POST' }).inputValida
   .handler(async ({ data }): Promise<{ ok: boolean; lines: string[]; databases: DatabaseSummary[] }> => call('/api/admin/users/kai-integrations/openmetadata/test', SystemCapabilities.MANAGE_CONFIGS, 'POST', data));
 
 // Other Admin Panel settings sections (stored in PostgreSQL, .env only as fallback). Secrets are write-only.
-export type SettingsSectionName = 'batch_model' | 'limits';
+export type SettingsSectionName = 'batch_model' | 'limits' | 'smtp';
 export interface SectionState {
   source: 'ui' | 'env' | 'none'; settings: Record<string, string | number | boolean>; secret_set?: boolean;
   storage_available: boolean; updated_at: string | null; updated_by: string | null;
 }
-const sectionName = z.enum(['batch_model', 'limits']);
+const sectionName = z.enum(['batch_model', 'limits', 'smtp']);
 const sectionForm = z.object({
   name: sectionName,
   values: z.record(z.string().max(64), z.union([z.string().max(8192), z.number().int().min(0).max(1e12), z.boolean()])),
@@ -106,3 +113,5 @@ export const settingsSectionFn = createServerFn({ method: 'GET' }).inputValidato
   .handler(async ({ data }): Promise<SectionState> => call(`/api/admin/users/kai-integrations/${data.name}`, SystemCapabilities.READ_CONFIGS));
 export const saveSettingsSectionFn = createServerFn({ method: 'POST' }).inputValidator(sectionForm)
   .handler(async ({ data }): Promise<SectionState> => call(`/api/admin/users/kai-integrations/${data.name}`, SystemCapabilities.MANAGE_CONFIGS, 'PUT', data.values));
+export const testSmtpFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ to: z.string().trim().email().max(254) }).strict())
+  .handler(async ({ data }): Promise<{ sent: boolean }> => call('/api/admin/users/kai-integrations/smtp/test', SystemCapabilities.MANAGE_CONFIGS, 'POST', data));
