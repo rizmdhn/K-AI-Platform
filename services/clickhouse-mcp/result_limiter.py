@@ -2,8 +2,10 @@
 
 import json
 
-MAX_RESULT_ROWS = 1000
-MAX_RESULT_BYTES = 1_048_576
+# Sized for a model context, not a download: ~32 KB is ~8k tokens per call.
+MAX_RESULT_ROWS = 200
+MAX_RESULT_BYTES = 32_768
+MAX_CELL_CHARS = 1000  # one JSON blob cell (e.g. a serialized model) otherwise eats the whole budget
 
 
 class ResultLimitError(ValueError):
@@ -12,6 +14,12 @@ class ResultLimitError(ValueError):
 
 def _json(value):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+
+
+def _clip(value):
+    if isinstance(value, str) and len(value) > MAX_CELL_CHARS:
+        return value[:MAX_CELL_CHARS] + f"…[dipotong, {len(value)} karakter]"
+    return value
 
 
 def _tail(count, truncated):
@@ -59,7 +67,7 @@ def limit_result(
             )
         encoded_rows = []
         for row in rows[:max_rows]:
-            encoded = _json(row)
+            encoded = _json([_clip(v) for v in row])
             count = len(encoded_rows) + 1
             size = len(encoded.encode("utf-8")) + (1 if encoded_rows else 0)
             if used + size + len(_tail(count, count < len(rows))) > max_bytes:

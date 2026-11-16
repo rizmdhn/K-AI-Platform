@@ -1,3 +1,4 @@
+from result_limiter import MAX_RESULT_ROWS
 import json
 import unittest
 
@@ -64,7 +65,7 @@ class ResultLimiterTests(unittest.TestCase):
 
     def test_default_limits_bound_large_results(self):
         many = json.loads(limit_result(source([[i] for i in range(1001)])))
-        self.assertEqual(many["row_count"], 1000)
+        self.assertEqual(many["row_count"], MAX_RESULT_ROWS)
         self.assertTrue(many["truncated"])
         large = limit_result(source([["雪" * 2000]] * 1000))
         self.assertLessEqual(len(large.encode()), 1_048_576)
@@ -74,6 +75,15 @@ class ResultLimiterTests(unittest.TestCase):
         text = '{"columns":["value"],"rows":[' + '[' * 10000 + '1' + ']' * 10000 + ']}'
         with self.assertRaises(ResultLimitError):
             limit_result(text)
+
+
+class CellClipTests(unittest.TestCase):
+    def test_long_cell_is_clipped(self):
+        text = json.dumps({"columns": ["blob"], "rows": [["x" * 50_000]]})
+        result = json.loads(limit_result(text))
+        self.assertEqual(result["row_count"], 1)
+        self.assertLess(len(result["rows"][0][0]), 1100)
+        self.assertIn("dipotong", result["rows"][0][0])
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+from result_limiter import MAX_RESULT_ROWS
 import json
 import unittest
 from types import SimpleNamespace
@@ -32,12 +33,12 @@ class ResultLimiterMiddlewareTests(unittest.IsolatedAsyncioTestCase):
     async def test_caps_returned_rows_and_removes_unbounded_structured_copy(self):
         result, audit, state = await self.invoke(upstream([[i] for i in range(1001)]))
         payload = json.loads(result.content[0].text)
-        self.assertEqual(payload["row_count"], 1000)
-        self.assertEqual(payload["rows"][-1], [999])
+        self.assertEqual(payload["row_count"], MAX_RESULT_ROWS)
+        self.assertEqual(payload["rows"][-1], [MAX_RESULT_ROWS - 1])
         self.assertTrue(payload["truncated"])
         self.assertEqual(result.structured_content, {"result": result.content[0].text})
         self.assertEqual(len(result.content), 1)
-        self.assertEqual(audit["rows"], 1000)
+        self.assertEqual(audit["rows"], MAX_RESULT_ROWS)
         self.assertEqual(audit["bytes"], len(result.content[0].text.encode()))
         self.assertTrue(audit["truncated"])
         self.assertNotIn("fixture-password", json.dumps(audit))
@@ -85,7 +86,7 @@ class ResultLimiterMiddlewareTests(unittest.IsolatedAsyncioTestCase):
             async with Client(server) as client:
                 result = await client.call_tool("run_query", {"query": "SELECT 1"})
                 payload = json.loads(result.content[0].text)
-                self.assertEqual(len(payload["rows"]), 1000)
+                self.assertEqual(len(payload["rows"]), MAX_RESULT_ROWS)
                 self.assertTrue(payload["truncated"])
                 self.assertEqual(result.structured_content, {"result": result.content[0].text})
                 denied = await client.call_tool("run_query", {"query": "DROP TABLE x"}, raise_on_error=False)

@@ -28,11 +28,6 @@ LOCATION = re.compile(r"[a-z0-9-]{1,40}")
 TIMEOUT = httpx.Timeout(300.0, connect=10.0)  # long answers stream for minutes
 _transport = None  # tests inject a mock transport
 log = logging.getLogger("uvicorn.error")
-# JSON Schema keywords Gemini's OpenAI-compatible endpoint rejects in tool parameters (MCP tools emit them).
-UNSUPPORTED = {"$schema", "$id", "additionalProperties", "exclusiveMinimum", "exclusiveMaximum", "default", "examples",
-               "propertyNames", "patternProperties", "title"}
-
-
 # Documented placeholder for clients that do not keep Gemini's thought signatures.
 SKIP_SIGNATURE = "skip_thought_signature_validator"
 
@@ -51,24 +46,6 @@ def keep_tool_turns_valid(messages):
         google = extra.setdefault("google", {}) if isinstance(extra, dict) else None
         if isinstance(google, dict):
             google.setdefault("thought_signature", SKIP_SIGNATURE)
-
-
-def gemini_schema(node):
-    """Tool parameter schema Gemini accepts: unsupported keywords dropped, `X | null` unions become X."""
-    if isinstance(node, list):
-        return [gemini_schema(item) for item in node]
-    if not isinstance(node, dict):
-        return node
-    union = node.get("anyOf", node.get("oneOf"))
-    if isinstance(union, list):
-        branches = [b for b in union if not (isinstance(b, dict) and b.get("type") == "null")]
-        if len(branches) == 1 and isinstance(branches[0], dict):
-            rest = {k: v for k, v in node.items() if k not in ("anyOf", "oneOf")}
-            return gemini_schema({**branches[0], **rest})
-    # "properties" maps names to schemas: keep every name (a field may be called "default" or "title").
-    return {key: ({name: gemini_schema(schema) for name, schema in value.items()} if key == "properties" and isinstance(value, dict)
-                  else gemini_schema(value))
-            for key, value in node.items() if key not in UNSUPPORTED}
 
 
 def target(env=os.environ):
@@ -105,11 +82,9 @@ async def chat_completions(request):
         return _error(400, "Missing model.")
     if "/" not in payload["model"]:
         payload["model"] = f"google/{payload['model']}"  # Vertex names publisher models google/<id>
+    # Tool schemas pass through unchanged: Gemini accepts them, and LibreChat validates the model's arguments
+    # against the same schema (dropping additionalProperties here let the model add arguments LibreChat rejects).
     keep_tool_turns_valid(payload.get("messages"))
-    for tool in payload.get("tools") or []:
-        function = tool.get("function") if isinstance(tool, dict) else None
-        if isinstance(function, dict) and isinstance(function.get("parameters"), dict):
-            function["parameters"] = gemini_schema(function["parameters"])
     url, key = configured
     client = httpx.AsyncClient(timeout=TIMEOUT, transport=_transport, follow_redirects=False, trust_env=False)
     try:

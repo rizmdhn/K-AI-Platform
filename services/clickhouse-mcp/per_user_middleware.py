@@ -127,6 +127,25 @@ def _row_count(result):
         return None
 
 
+TABLE_FIELDS = ("database", "name", "engine", "total_rows", "comment")
+
+
+def _slim_tables(result):
+    """list_tables also returns each table's full DDL and storage stats (~1 KB per table); names are enough to pick one."""
+    try:
+        payload = json.loads(result.content[0].text)
+        slim = [{k: t.get(k) for k in TABLE_FIELDS} for t in payload["tables"]]
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+        return result
+    if slim == payload["tables"]:
+        return result
+    payload["tables"] = slim
+    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    wrapped = isinstance(result.structured_content, dict) and "result" in result.structured_content
+    # Keep the upstream structured shape ({"result": str} when wrapped) so output-schema checks still pass.
+    return ToolResult(content=text, structured_content={"result": text} if wrapped else payload, meta=result.meta)
+
+
 class PerUserClickHouse(Middleware):
     async def on_call_tool(self, context, call_next):
         started = time.monotonic()
@@ -231,6 +250,8 @@ class PerUserClickHouse(Middleware):
                     bytes=len(text.encode("utf-8")),
                     truncated=json.loads(text)["truncated"],
                 )
+            if tool == "list_tables":
+                result = _slim_tables(result)
             record.update(outcome="ok", rows=_row_count(result))
             return result
         except asyncio.CancelledError:

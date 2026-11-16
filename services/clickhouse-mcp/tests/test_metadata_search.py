@@ -17,17 +17,17 @@ TABLES = {
 }
 
 
-async def fake_databases():
-    return json.dumps(list(TABLES))
-
-
-async def fake_tables(database, page_token=None, page_size=100, include_detailed_columns=True):
-    return json.dumps({"tables": TABLES[database], "next_page_token": None})
+async def fake_run_query(sql):
+    visible = [t for db, ts in TABLES.items() if db != "system" for t in ts]  # the SQL filters system databases
+    if "system.tables" in sql:
+        return json.dumps({"columns": ["database", "name", "comment", "total_rows"],
+                           "rows": [[t["database"], t["name"], t["comment"], t.get("total_rows", 10)] for t in visible]})
+    return json.dumps({"columns": ["database", "table", "name", "type", "comment"],
+                       "rows": [[t["database"], t["name"], c["name"], c["column_type"], ""] for t in visible for c in t["columns"]]})
 
 
 def search(query, **kwargs):
-    with mock.patch.object(metadata_search, "list_databases_async", fake_databases), \
-         mock.patch.object(metadata_search, "list_tables_async", fake_tables):
+    with mock.patch.object(metadata_search, "run_query_async", fake_run_query):
         return json.loads(asyncio.run(metadata_search.search_database_metadata(query, **kwargs)))
 
 
@@ -62,6 +62,29 @@ class MetadataSearchTests(unittest.TestCase):
         self.assertNotIn("gaji", text.lower())
         self.assertNotIn("rahasia", text)
         self.assertNotIn("description", result["results"][1])
+
+    def test_scratch_copies_and_bronze_rank_below_gold(self):
+        extra = [{"database": "gold", "name": "penjualan_coba", "comment": "Penjualan per region",
+                  "columns": [{"name": "region", "column_type": "String"}, {"name": "amount", "column_type": "UInt32"}]},
+                 {"database": "bronze", "name": "penjualan", "comment": "Penjualan per region",
+                  "columns": [{"name": "region", "column_type": "String"}, {"name": "amount", "column_type": "UInt32"}]}]
+        with mock.patch.dict(TABLES, {"gold": TABLES["gold"] + extra[:1], "bronze": extra[1:]}), \
+             mock.patch.object(metadata_search, "EMBEDDINGS_URL", ""):
+            result = search("penjualan per region", limit=3)
+        self.assertEqual([(r["database"], r["table"]) for r in result["results"]][0], ("gold", "penjualan"))
+
+    def test_catalog_is_cached_per_user(self):
+        calls = []
+        async def counting(sql):
+            calls.append(sql)
+            return await fake_run_query(sql)
+        metadata_search._catalogs.clear()
+        with mock.patch.object(metadata_search, "run_query_async", counting), \
+             mock.patch.object(metadata_search.clients, "_get_client_config_overrides", lambda: {"username": "alice"}):
+            asyncio.run(metadata_search._visible_tables())
+            asyncio.run(metadata_search._visible_tables())
+        self.assertEqual(len(calls), 2)  # tables + columns once, second call served from cache
+        metadata_search._catalogs.clear()
 
     def test_rejects_bad_arguments(self):
         for query, limit in (("", 5), ("x" * 1001, 5), ("ok", 0), ("ok", 21)):

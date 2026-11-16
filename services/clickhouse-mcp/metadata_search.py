@@ -14,7 +14,10 @@ import re
 from array import array
 
 import httpx2 as httpx
-from mcp_clickhouse.mcp_server import list_databases_async, list_tables_async
+import time
+
+from mcp_clickhouse import clients
+from mcp_clickhouse.mcp_server import run_query_async
 
 from openmetadata import approved_metadata
 from tool_errors import GatewayError
@@ -22,8 +25,21 @@ from tool_errors import GatewayError
 EMBEDDINGS_URL = os.getenv("KAI_EMBEDDINGS_URL", "")
 EMBEDDINGS_MODEL = "bge-m3"
 MAX_TABLES = 500
-MAX_COLUMNS_SHOWN = 40
+MAX_COLUMNS_SHOWN = 15
 HIDDEN_DATABASES = {"system", "information_schema"}
+CATALOG_TTL = 600  # seconds; a new table shows up in search within 10 minutes
+_catalogs = {}  # ClickHouse user -> (expires_at, tables); keyed per user because grants decide visibility
+_HIDDEN_SQL = "database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema')"
+TABLES_SQL = (
+    f"SELECT database, name, comment, total_rows FROM system.tables WHERE {_HIDDEN_SQL} "
+    f"AND NOT is_temporary AND name NOT LIKE '.%' ORDER BY database, name LIMIT {MAX_TABLES}"
+)
+COLUMNS_SQL = (
+    f"SELECT database, table, name, type, comment FROM system.columns WHERE {_HIDDEN_SQL} "
+    "ORDER BY database, table, position LIMIT 100000"
+)
+LAYER_WEIGHT = {"gold": 1.0, "silver": 0.9, "bronze": 0.6, "raw": 0.6}
+NOISE = re.compile(r"(_coba|_dulu|_tmp|_temp|_test|_try|_snap|_bak|_backup|_old|_copy|_\d{2,})(_|$)", re.I)
 MAX_DESCRIPTION_CHARS = 4000  # keeps one very wide table under the embedding server's 8192-token window
 _cache = {}  # text -> float32 vector (array, ~4 KB for bge-m3 instead of ~32 KB as a list)
 
@@ -81,23 +97,52 @@ def _cosine(a, b):
     )
 
 
+def _rows(text):
+    payload = json.loads(text)
+    return [dict(zip(payload["columns"], row)) for row in payload["rows"]]
+
+
+async def _load_catalog():
+    """Two metadata queries (system.tables + system.columns) instead of paging list_tables per database.
+
+    They run as the caller (request overrides), so ClickHouse grants filter both lists.
+    """
+    tables = {
+        (t["database"], t["name"]): {**t, "columns": []}
+        for t in _rows(await run_query_async(TABLES_SQL))
+        if t["database"].lower() not in HIDDEN_DATABASES
+    }
+    for c in _rows(await run_query_async(COLUMNS_SQL)):
+        table = tables.get((c["database"], c["table"]))
+        if table is not None:
+            table["columns"].append({"name": c["name"], "column_type": c["type"], "comment": c["comment"]})
+    return list(tables.values())
+
+
 async def _visible_tables():
-    tables = []
-    for database in json.loads(await list_databases_async()):
-        if database.lower() in HIDDEN_DATABASES:
-            continue
-        token = None
-        while len(tables) < MAX_TABLES:
-            page = json.loads(
-                await list_tables_async(
-                    database=database, page_token=token, page_size=100, include_detailed_columns=True
-                )
-            )
-            tables += page["tables"]
-            token = page.get("next_page_token")
-            if not token:
-                break
-    return tables[:MAX_TABLES]
+    overrides = clients._get_client_config_overrides() or {}
+    user = overrides.get("username")
+    if not user:  # no per-user identity to key on: never share a cached catalog
+        return await _load_catalog()
+    now = time.monotonic()
+    cached = _catalogs.get(user)
+    if cached and cached[0] > now:
+        return cached[1]
+    tables = await _load_catalog()
+    if len(_catalogs) > 1000:
+        _catalogs.clear()
+    _catalogs[user] = (now + CATALOG_TTL, tables)
+    return tables
+
+
+def _weight(table):
+    """Prefer curated layers and push scratch copies (_coba, _tmp, ...) and empty tables down."""
+    weight = LAYER_WEIGHT.get(table["database"].lower(), 0.8)
+    if NOISE.search(table["name"]):
+        weight *= 0.5
+    if table.get("total_rows") == 0:
+        weight *= 0.5
+    return weight
 
 
 def _approved_fields(approved):
@@ -135,6 +180,7 @@ async def search_database_metadata(query: str, limit: int = 5) -> str:
     except (OSError, httpx.HTTPError, KeyError, ValueError):
         method = "keyword"  # local embedding server down or not configured
         scores = _lexical(query, docs)
+    scores = [score * _weight(t) for score, t in zip(scores, tables)]
     ranked = sorted(zip(scores, tables, views), key=lambda item: item[0], reverse=True)[:limit]
     results = [
         {

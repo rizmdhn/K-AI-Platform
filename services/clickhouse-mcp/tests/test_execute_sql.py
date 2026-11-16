@@ -1,3 +1,4 @@
+from result_limiter import MAX_RESULT_ROWS
 import hashlib
 import json
 import unittest
@@ -38,9 +39,9 @@ class ExecuteSQLTests(unittest.IsolatedAsyncioTestCase):
                     text = result.content[0].text
                     payload = json.loads(text)
                     audit = json.loads(log.call_args.args[0])
-                    self.assertEqual(len(payload["rows"]), 1000)
+                    self.assertEqual(len(payload["rows"]), MAX_RESULT_ROWS)
                     self.assertTrue(payload["truncated"])
-                    self.assertEqual(payload["row_count"], 1000)
+                    self.assertEqual(payload["row_count"], MAX_RESULT_ROWS)
                     self.assertEqual(payload["request_id"], audit["request_id"])
                     self.assertEqual(audit["purpose_sha256"], hashlib.sha256(b"private-purpose").hexdigest())
                     self.assertNotIn("private-purpose", json.dumps(audit))

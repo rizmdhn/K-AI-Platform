@@ -79,27 +79,12 @@ class VertexProxyTests(unittest.TestCase):
         self.assertNotIn(b"AQ.fixture", body)
 
 
-class GeminiSchemaTests(unittest.TestCase):
-    def test_tool_schemas_are_made_gemini_compatible_without_losing_fields(self):
-        schema = {"additionalProperties": False, "type": "object", "required": ["query"], "properties": {
-            "query": {"type": "string", "minLength": 1},
-            "params": {"anyOf": [{"type": "object", "additionalProperties": True}, {"type": "null"}], "default": None},
-            "page_size": {"type": "integer", "exclusiveMinimum": 0, "default": 50, "description": "rows"},
-            "default": {"type": "string", "title": "Default"},
-            "mode": {"anyOf": [{"type": "string"}, {"type": "integer"}]}}}
-        clean = vertex_proxy.gemini_schema(schema)
-        self.assertEqual(clean["required"], ["query"])
-        self.assertEqual(set(clean["properties"]), {"query", "params", "page_size", "default", "mode"})
-        self.assertEqual(clean["properties"]["params"], {"type": "object"})
-        self.assertEqual(clean["properties"]["page_size"], {"type": "integer", "description": "rows"})
-        self.assertEqual(clean["properties"]["default"], {"type": "string"})
-        self.assertEqual(clean["properties"]["query"]["minLength"], 1)
-        self.assertIn("anyOf", clean["properties"]["mode"])  # real unions are left alone
-        self.assertNotIn("additionalProperties", json.dumps(clean))
-
-    def test_proxy_rewrites_tools_and_logs_upstream_rejections(self):
+class UpstreamErrorTests(unittest.TestCase):
+    def test_tool_schemas_pass_unchanged_and_rejections_are_logged_without_key_or_content(self):
+        params = {"type": "object", "additionalProperties": False, "required": ["sql", "purpose"],
+                  "properties": {"sql": {"type": "string"}, "purpose": {"type": "string", "maxLength": 500}}}
         body = {"model": "gemini-x", "messages": [{"role": "user", "content": "rahasia pengguna"}],
-                "tools": [{"type": "function", "function": {"name": "run_query", "parameters": {"type": "object", "additionalProperties": False, "properties": {}}}}]}
+                "tools": [{"type": "function", "function": {"name": "execute_readonly_sql", "parameters": params}}]}
         seen = {}
 
         def reject(upstream):
@@ -108,7 +93,7 @@ class GeminiSchemaTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, ENV), self.assertLogs("uvicorn.error", "WARNING") as logs:
             response, _, _ = run(Request(body), reject)
-        self.assertNotIn("additionalProperties", json.dumps(seen["body"]["tools"]))
+        self.assertEqual(seen["body"]["tools"][0]["function"]["parameters"], params)
         self.assertEqual(response.status_code, 400)
         self.assertIn(b"Invalid tools[0]", response.body)
         text = " ".join(logs.output)
