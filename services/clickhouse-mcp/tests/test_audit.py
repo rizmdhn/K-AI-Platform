@@ -43,6 +43,16 @@ def raising(message):
 
 @mock.patch.dict('os.environ', {'KAI_BINDING_MODE': 'manual'})
 class AuditTests(unittest.TestCase):
+    def test_list_tables_never_returns_column_details(self):
+        seen = {}
+
+        async def call_next(context):
+            seen.update(context.message.arguments)
+            return SimpleNamespace(content=[SimpleNamespace(text="[]")])
+
+        run("list_tables", {"database": "gold", "include_detailed_columns": True}, ALICE, call_next)
+        self.assertEqual(seen, {"database": "gold", "include_detailed_columns": False})
+
     def test_success_line_has_trace_fields_and_no_secrets(self):
         sql = "SELECT secret_literal FROM t"
         record, state, error = run("run_query", {"query": sql}, ALICE, returning([[1], [2]]))

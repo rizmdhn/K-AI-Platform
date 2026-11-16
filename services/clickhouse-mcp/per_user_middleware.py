@@ -133,6 +133,10 @@ class PerUserClickHouse(Middleware):
         headers = get_http_headers()
         tool = context.message.name
         args = context.message.arguments or {}
+        if tool == "list_tables" and isinstance(context.message.arguments, dict):
+            # Column details for every listed table flood the model context (tens of thousands of tokens per page);
+            # get_table_schema gives one table's columns when they are actually needed.
+            context.message.arguments["include_detailed_columns"] = False
         managed = os.getenv("KAI_BINDING_MODE", "managed") == "managed"
         user, password = (
             ("", "")
