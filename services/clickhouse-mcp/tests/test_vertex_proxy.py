@@ -79,5 +79,62 @@ class VertexProxyTests(unittest.TestCase):
         self.assertNotIn(b"AQ.fixture", body)
 
 
+class GeminiSchemaTests(unittest.TestCase):
+    def test_tool_schemas_are_made_gemini_compatible_without_losing_fields(self):
+        schema = {"additionalProperties": False, "type": "object", "required": ["query"], "properties": {
+            "query": {"type": "string", "minLength": 1},
+            "params": {"anyOf": [{"type": "object", "additionalProperties": True}, {"type": "null"}], "default": None},
+            "page_size": {"type": "integer", "exclusiveMinimum": 0, "default": 50, "description": "rows"},
+            "default": {"type": "string", "title": "Default"},
+            "mode": {"anyOf": [{"type": "string"}, {"type": "integer"}]}}}
+        clean = vertex_proxy.gemini_schema(schema)
+        self.assertEqual(clean["required"], ["query"])
+        self.assertEqual(set(clean["properties"]), {"query", "params", "page_size", "default", "mode"})
+        self.assertEqual(clean["properties"]["params"], {"type": "object"})
+        self.assertEqual(clean["properties"]["page_size"], {"type": "integer", "description": "rows"})
+        self.assertEqual(clean["properties"]["default"], {"type": "string"})
+        self.assertEqual(clean["properties"]["query"]["minLength"], 1)
+        self.assertIn("anyOf", clean["properties"]["mode"])  # real unions are left alone
+        self.assertNotIn("additionalProperties", json.dumps(clean))
+
+    def test_proxy_rewrites_tools_and_logs_upstream_rejections(self):
+        body = {"model": "gemini-x", "messages": [{"role": "user", "content": "rahasia pengguna"}],
+                "tools": [{"type": "function", "function": {"name": "run_query", "parameters": {"type": "object", "additionalProperties": False, "properties": {}}}}]}
+        seen = {}
+
+        def reject(upstream):
+            seen["body"] = json.loads(upstream.content)
+            return httpx.Response(400, headers={"content-type": "application/json"}, content=b'{"error":{"message":"Invalid tools[0]"}}')
+
+        with mock.patch.dict(os.environ, ENV), self.assertLogs("uvicorn.error", "WARNING") as logs:
+            response, _, _ = run(Request(body), reject)
+        self.assertNotIn("additionalProperties", json.dumps(seen["body"]["tools"]))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b"Invalid tools[0]", response.body)
+        text = " ".join(logs.output)
+        self.assertIn("HTTP 400", text); self.assertIn("Invalid tools[0]", text)
+        self.assertNotIn("AQ.fixture", text); self.assertNotIn("rahasia", text)
+
+
+class ThoughtSignatureTests(unittest.TestCase):
+    def test_follow_up_turn_gets_a_signature_on_the_first_tool_call_only_and_real_ones_are_kept(self):
+        body = {"model": "gemini-3.5-flash", "messages": [
+            {"role": "user", "content": "data apa saja"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "a", "type": "function", "function": {"name": "list_databases", "arguments": "{}"}},
+                {"id": "b", "type": "function", "function": {"name": "list_tables", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "a", "content": "[]"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "c", "type": "function", "function": {"name": "run_query", "arguments": "{}"},
+                 "extra_content": {"google": {"thought_signature": "real-signature"}}}]}]}
+        with mock.patch.dict(os.environ, ENV):
+            _, _, seen = run(Request(body))
+        messages = seen["body"]["messages"]
+        self.assertEqual(messages[1]["tool_calls"][0]["extra_content"]["google"]["thought_signature"], vertex_proxy.SKIP_SIGNATURE)
+        self.assertNotIn("extra_content", messages[1]["tool_calls"][1])
+        self.assertEqual(messages[3]["tool_calls"][0]["extra_content"]["google"]["thought_signature"], "real-signature")
+        self.assertNotIn("extra_content", messages[0])
+
+
 if __name__ == "__main__":
     unittest.main()

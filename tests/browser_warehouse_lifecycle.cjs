@@ -50,10 +50,17 @@ let step = "setup", panelRef;
     const agentBox = (d) => d.getByLabel("Izinkan memakai K-AI - CH");
     const save = async (d, password, username) => {
       const w = warehouse(d);
-      const field = w.getByLabel("Username ClickHouse");
-      if (await field.isEditable()) await field.fill(username);
+      // A bound account shows a summary; its password form opens with "Ganti password".
+      const change = w.getByRole("button", { name: "Ganti password" });
+      if (await change.count()) {
+        await change.click();
+        await w.getByLabel("Password ClickHouse baru").fill(password);
+        await w.getByRole("button", { name: "Simpan password" }).click();
+        return;
+      }
+      await w.getByLabel("Username ClickHouse").fill(username);
       await w.getByLabel("Password ClickHouse").fill(password);
-      await w.getByRole("button", { name: /Simpan kredensial|Ganti password/ }).click();
+      await w.getByRole("button", { name: "Simpan kredensial" }).click();
     };
     const chatSees = async (user) => {
       const page = await (await browser.newContext()).newPage();
