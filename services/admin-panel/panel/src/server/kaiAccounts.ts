@@ -75,6 +75,20 @@ export interface Problems {
 export const problemsFn = createServerFn({ method: 'GET' })
   .handler(async (): Promise<Problems> => call('/api/admin/users/kai-problems', SystemCapabilities.READ_USERS));
 
+// Token usage from LibreChat transactions; usd is null until prices are saved under Integrasi.
+export interface UsageTotals { prompt: number; completion: number; calls: number; usd: number | null }
+export interface UsageSummary {
+  days: number; since: string; user_count: number; total: UsageTotals; previous: UsageTotals;
+  pricing: { priced: boolean; input_usd_per_million: number | null; output_usd_per_million: number | null; usd_to_idr: number | null };
+  users: (UsageTotals & { id: string; name: string | null; email: string | null })[];
+  models: (UsageTotals & { model: string })[];
+  bucket: 'hour' | 'day';
+  daily: { day: string; prompt: number; completion: number; calls: number }[];
+}
+const usageDays = z.union([z.literal(1), z.literal(7), z.literal(30), z.literal(90)]);
+export const usageFn = createServerFn({ method: 'GET' }).inputValidator(z.object({ days: usageDays }).strict())
+  .handler(async ({ data }): Promise<UsageSummary> => call(`/api/admin/users/kai-usage?days=${data.days}`, SystemCapabilities.READ_USERS));
+
 // Integration settings (OpenMetadata + metadata draft worker). The token is write-only: never returned.
 export interface OpenMetadataSettings {
   url: string; service: string; ca_cert: string; catalog_enabled: boolean; databases: string[]; scan_hours: number; max_tables: number;
@@ -99,12 +113,12 @@ export const testOpenMetadataFn = createServerFn({ method: 'POST' }).inputValida
   .handler(async ({ data }): Promise<{ ok: boolean; lines: string[]; databases: DatabaseSummary[] }> => call('/api/admin/users/kai-integrations/openmetadata/test', SystemCapabilities.MANAGE_CONFIGS, 'POST', data));
 
 // Other Admin Panel settings sections (stored in PostgreSQL, .env only as fallback). Secrets are write-only.
-export type SettingsSectionName = 'batch_model' | 'limits' | 'smtp';
+export type SettingsSectionName = 'batch_model' | 'limits' | 'smtp' | 'pricing';
 export interface SectionState {
   source: 'ui' | 'env' | 'none'; settings: Record<string, string | number | boolean>; secret_set?: boolean;
   storage_available: boolean; updated_at: string | null; updated_by: string | null;
 }
-const sectionName = z.enum(['batch_model', 'limits', 'smtp']);
+const sectionName = z.enum(['batch_model', 'limits', 'smtp', 'pricing']);
 const sectionForm = z.object({
   name: sectionName,
   values: z.record(z.string().max(64), z.union([z.string().max(8192), z.number().int().min(0).max(1e12), z.boolean()])),

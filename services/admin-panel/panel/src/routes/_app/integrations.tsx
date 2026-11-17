@@ -11,7 +11,7 @@ function IntegrationsRoute() {
   if (isLoading) return null;
   if (isError) return <PermissionsUnavailable />;
   if (!hasCapability(SystemCapabilities.READ_CONFIGS)) return <AccessDenied />;
-  return <div className="flex flex-col gap-4 p-6">
+  return <div className="flex flex-col gap-4 p-4 md:p-6">
     <h1 className="text-xl font-medium">Integrasi</h1>
     <IntegrationsPanel />
     <SettingsSection name="batch_model" title="Model AI untuk tugas batch"
@@ -48,6 +48,13 @@ function IntegrationsRoute() {
       ]}>
       <SmtpTest />
     </SettingsSection>
+    <SettingsSection name="pricing" title="Harga model"
+      description="Tarif per 1 juta token sesuai daftar harga penyedia model (contoh: Gemini pada Vertex AI). Nilai ini digunakan untuk estimasi biaya pada dashboard dan bukan merupakan tagihan resmi. Kosongkan apabila belum tersedia."
+      fields={[
+        { key: 'input_usd_per_million', label: 'Token masuk (US$ per 1 juta token)', type: 'text', placeholder: '0.30' },
+        { key: 'output_usd_per_million', label: 'Token keluar (US$ per 1 juta token)', type: 'text', placeholder: '2.50' },
+        { key: 'usd_to_idr', label: 'Kurs (Rupiah per US$)', type: 'text', placeholder: '16500', help: 'Opsional. Diperlukan untuk menampilkan biaya dalam Rupiah.' },
+      ]} />
     <SettingsSection name="limits" title="Batas query dan log"
       description="Batas atas setiap query ClickHouse dari kAI. Profil pengguna di ClickHouse (DBA) tetap berlaku bila lebih ketat atau dikunci."
       fields={[

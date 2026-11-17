@@ -8,6 +8,8 @@ export interface SidebarProps {
   } | null;
   collapsed: boolean;
   onToggle: () => void;
+  /** Below the md breakpoint the sidebar is an off-canvas drawer, shown only while this is true. */
+  mobileOpen?: boolean;
 }
 
 export interface NavItem {
@@ -20,6 +22,7 @@ export interface NavItem {
 export interface HeaderProps {
   title?: string;
   onSearchClick?: () => void;
+  onMenuClick?: () => void;
   children?: ReactNode;
 }
 

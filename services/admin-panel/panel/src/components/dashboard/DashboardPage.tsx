@@ -5,6 +5,7 @@ import type * as t from '@/types';
 import { useCapabilities, useLocalize } from '@/hooks';
 import { SystemCapabilities } from '@/constants';
 import { ProblemsPanel } from '@/components/users/ProblemsPanel';
+import { UsagePanel } from '@/components/users/UsagePanel';
 
 const QUICK_LINKS: (t.NavItem & { descKey: string })[] = [
   {
@@ -56,14 +57,15 @@ export function DashboardPage() {
     <div
       role="region"
       aria-label={localize('com_nav_dashboard')}
-      className="flex flex-1 flex-col gap-8 overflow-auto p-6"
+      className="flex flex-1 flex-col gap-6 overflow-auto p-4 md:gap-8 md:p-6"
     >
       {hasCapability(SystemCapabilities.READ_USERS) && <ProblemsPanel />}
+      {hasCapability(SystemCapabilities.READ_USERS) && <UsagePanel />}
       <section aria-label={localize('com_dash_quick_links')}>
         <h3 className="mb-3 text-sm font-medium text-(--cui-color-text-muted)">
           {localize('com_dash_quick_links')}
         </h3>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {visibleLinks.map((link) => (
             <Link
               key={link.path}
@@ -88,7 +90,7 @@ export function DashboardPage() {
 
       <section
         aria-label={localize('com_dash_nav_tips')}
-        className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) p-5"
+        className="hidden rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) p-5 md:block"
       >
         <h3 className="mb-3 text-sm font-medium text-(--cui-color-text-default)">
           {localize('com_dash_nav_tips')}

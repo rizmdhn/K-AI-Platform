@@ -242,5 +242,17 @@ class IntegrationSettingsTests(unittest.TestCase):
             self.assertEqual(asyncio.run(settings.settings_request(request)).status_code, 404)
 
 
+class PricingSettingsTests(unittest.TestCase):
+    def test_prices_accept_decimal_comma_and_blank(self):
+        cleaned = settings.clean_pricing(
+            {"input_usd_per_million": "0,30", "output_usd_per_million": 2.5, "usd_to_idr": ""}, {})
+        self.assertEqual(cleaned, {"KAI_PRICE_INPUT_USD_PER_M": "0.3", "KAI_PRICE_OUTPUT_USD_PER_M": "2.5", "KAI_USD_TO_IDR": ""})
+
+    def test_prices_reject_text_and_out_of_range(self):
+        for body in ({"input_usd_per_million": "murah"}, {"output_usd_per_million": "-1"}, {"usd_to_idr": "nan"}):
+            with self.subTest(body=body), self.assertRaises(settings.SettingsError):
+                settings.clean_pricing(body, {})
+
+
 if __name__ == "__main__":
     unittest.main()

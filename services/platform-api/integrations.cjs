@@ -1,4 +1,4 @@
-// Admin Panel settings sections (OpenMetadata, batch model, limits, SMTP). Viewing needs read:configs, saving/testing
+// Admin Panel settings sections (OpenMetadata, batch model, limits, SMTP, pricing). Viewing needs read:configs, saving/testing
 // manage:configs. Proxies the MCP's internal routes; the editor id comes from the session. Secrets go in, never out.
 const { AccountError } = require("./accounts.cjs");
 const MCP = "http://clickhouse-mcp:8000/v1/internal/integrations/";
@@ -8,6 +8,7 @@ const SECTIONS = {
   batch_model: ["enabled", "base_url", "model", "api_key", "jobs_per_day", "sample_rows"],
   limits: ["max_execution_seconds", "max_memory_gb", "max_rows_million", "max_read_gb", "log_retention_days"],
   smtp: ["host", "port", "security", "username", "password", "from", "from_name"],
+  pricing: ["input_usd_per_million", "output_usd_per_million", "usd_to_idr"],
 };
 
 function createIntegrations({ hasCapability, fetchImpl = fetch }) {
@@ -52,6 +53,8 @@ function createIntegrations({ hasCapability, fetchImpl = fetch }) {
       if (typeof req.body?.to !== "string") throw new AccountError("Isi alamat email tujuan.");
       return mcp("smtp/test", "POST", { to: req.body.to });
     },
+    /** Internal (no session): saved price settings for the usage estimate; {} when the MCP is unreachable. */
+    pricing: async () => (await mcp("pricing", "GET").catch(() => ({}))).settings ?? {},
     /** Never throws: {sent:true} or {sent:false, configured, message} so account actions still return their link. */
     mail: async (to, subject, text) => {
       try { await mcp("", "POST", { to, subject, text }, MAIL); return { sent: true }; }

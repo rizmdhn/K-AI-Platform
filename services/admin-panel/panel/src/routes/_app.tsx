@@ -49,6 +49,8 @@ function AppLayout() {
     return stored !== null ? stored === 'true' : true;
   });
   const pathname = router.state.location.pathname;
+  const [mobileOpen, setMobileOpen] = useState(false);
+  useEffect(() => setMobileOpen(false), [pathname]);
 
   const toggleSidebar = () =>
     setSidebarCollapsed((prev) => {
@@ -79,9 +81,10 @@ function AppLayout() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
+      <Sidebar user={user} collapsed={sidebarCollapsed && !mobileOpen} onToggle={toggleSidebar} mobileOpen={mobileOpen} />
+      {mobileOpen && <div aria-hidden="true" className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={() => setMobileOpen(false)} />}
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header title={title} onSearchClick={() => setOpen(true)} />
+        <Header title={title} onSearchClick={() => setOpen(true)} onMenuClick={() => setMobileOpen(true)} />
         <main className="flex min-h-0 flex-1 flex-col overflow-auto">
           <Outlet />
         </main>

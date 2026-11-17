@@ -70,4 +70,12 @@ SELECT NOT EXISTS (
     \ir migrations/010_release_ch_username.sql
     INSERT INTO kai.schema_migrations (version) VALUES ('010_release_ch_username');
 \endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM kai.schema_migrations WHERE version = '011_pricing_settings'
+) AS apply_pricing_settings \gset
+\if :apply_pricing_settings
+    \ir migrations/011_pricing_settings.sql
+    INSERT INTO kai.schema_migrations (version) VALUES ('011_pricing_settings');
+\endif
 COMMIT;

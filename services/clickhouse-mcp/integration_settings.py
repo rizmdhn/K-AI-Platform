@@ -349,6 +349,38 @@ def send_mail(settings, to, subject, text, timeout=15):
         raise SettingsError("Server SMTP tidak bisa dihubungi. Periksa host, port, dan izin jaringan keluar server.") from None
 
 
+# form field -> (env key, label, max); prices in USD per 1M tokens, rate in IDR per USD. Empty = not set.
+PRICING_FORM = {
+    "input_usd_per_million": ("KAI_PRICE_INPUT_USD_PER_M", "Harga token masuk", 1000),
+    "output_usd_per_million": ("KAI_PRICE_OUTPUT_USD_PER_M", "Harga token keluar", 1000),
+    "usd_to_idr": ("KAI_USD_TO_IDR", "Kurs USD ke Rupiah", 1_000_000),
+}
+
+
+def _price(value, label, high):
+    text = (value if isinstance(value, (str, int, float)) and not isinstance(value, bool) else "")
+    text = str(text).strip().replace(",", ".")
+    if not text:
+        return ""
+    try:
+        number = float(text)
+    except ValueError:
+        raise SettingsError(f"{label} harus angka, mis. 0.30.") from None
+    if not 0 <= number <= high or number != number:
+        raise SettingsError(f"{label} harus antara 0 dan {high}.")
+    return f"{number:g}"
+
+
+def clean_pricing(body, current):
+    if not isinstance(body, dict):
+        raise SettingsError("Isian tidak valid.")
+    return {key: _price(body.get(field), label, high) for field, (key, label, high) in PRICING_FORM.items()}
+
+
+def public_pricing(settings, row):
+    return {**_meta(settings, row), "settings": {field: settings[key] for field, (key, _, _) in PRICING_FORM.items()}}
+
+
 SECTIONS = {
     NAME: {"fields": FIELDS, "secret": SECRET, "marker": "KAI_OPENMETADATA_URL", "clean": clean, "public": public},
     "batch_model": {"fields": ("KAI_BATCH_ENABLED", "KAI_BATCH_MODEL_BASE_URL", "KAI_BATCH_MODEL", "KAI_BATCH_MODEL_API_KEY",
@@ -360,6 +392,8 @@ SECTIONS = {
     "smtp": {"fields": ("KAI_SMTP_HOST", "KAI_SMTP_PORT", "KAI_SMTP_SECURITY", "KAI_SMTP_USERNAME", "KAI_SMTP_PASSWORD",
                         "KAI_SMTP_FROM", "KAI_SMTP_FROM_NAME"),
              "secret": "KAI_SMTP_PASSWORD", "marker": "KAI_SMTP_HOST", "clean": clean_smtp, "public": public_smtp},
+    "pricing": {"fields": tuple(key for key, _, _ in PRICING_FORM.values()), "secret": None, "marker": None,
+                "clean": clean_pricing, "public": public_pricing},
 }
 
 

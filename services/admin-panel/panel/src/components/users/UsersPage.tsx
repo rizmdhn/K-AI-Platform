@@ -108,7 +108,7 @@ export function UsersPage() {
     <div
       role="region"
       aria-label={localize('com_nav_users')}
-      className="flex flex-1 flex-col gap-6 overflow-auto p-6"
+      className="flex flex-1 flex-col gap-6 overflow-auto p-4 md:p-6"
     >
       <section aria-label={localize('com_users_list')}>
         <div className="mb-3 flex flex-wrap items-center gap-3">

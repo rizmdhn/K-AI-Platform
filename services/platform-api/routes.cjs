@@ -25,6 +25,12 @@ const problems = require("./problems.cjs").createProblems({
 const integrations = require("./integrations.cjs").createIntegrations({
   hasCapability: require("~/server/middleware/roles/capabilities").hasCapability,
 });
+const usage = require("./usage.cjs").createUsage({
+  hasCapability: require("~/server/middleware/roles/capabilities").hasCapability,
+  aggregate: (pipeline) => require("mongoose").model("Transaction").aggregate(pipeline).option({ maxTimeMS: 10000 }),
+  findUsers: (ids) => require("mongoose").model("User").find({ _id: { $in: ids } }, { name: 1, email: 1 }).lean().maxTimeMS(3000),
+  pricing: () => integrations.pricing(),
+});
 function errorResponse(res, error) {
   if (error?.code === 11000)
     return res
@@ -63,6 +69,7 @@ function installAdmin(router) {
     }
   };
   router.get("/kai-problems", handle(problems.list));
+  router.get("/kai-usage", handle(usage.summary));
   router.post("/kai-integrations/openmetadata/test", handle(integrations.test));
   router.post("/kai-integrations/smtp/test", handle(integrations.testSmtp));
   router.get("/kai-integrations/openmetadata/databases", handle(integrations.databases));

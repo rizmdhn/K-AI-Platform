@@ -45,7 +45,7 @@ function getUserInitials(user?: { name?: string; email?: string } | null): strin
   return '';
 }
 
-export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
+export function Sidebar({ user, collapsed, onToggle, mobileOpen = false }: t.SidebarProps) {
   const localize = useLocalize();
   const router = useRouter();
   const { hasCapability } = useCapabilities();
@@ -87,8 +87,9 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
       <aside
         aria-label={localize('com_a11y_admin_panel')}
         className={cn(
-          'sticky top-0 z-(--z-floating) flex h-screen shrink-0 flex-col overflow-hidden border-r border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) transition-[width] duration-200',
-          collapsed ? 'w-14' : 'w-63',
+          'fixed inset-y-0 left-0 z-50 flex h-screen shrink-0 flex-col overflow-hidden border-r border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) transition-[width,transform] duration-200 md:sticky md:top-0 md:z-(--z-floating) md:translate-x-0',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full',
+          collapsed ? 'w-63 md:w-14' : 'w-63',
         )}
       >
         <div className="flex h-14 shrink-0 items-center px-2">
@@ -191,7 +192,7 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
           onClick={onToggle}
           aria-label={localize(collapsed ? 'com_nav_expand_sidebar' : 'com_nav_collapse_sidebar')}
           title={localize(collapsed ? 'com_nav_expand_sidebar' : 'com_nav_collapse_sidebar')}
-          className="flex w-full shrink-0 cursor-pointer items-center justify-center border-t border-(--cui-color-stroke-default) bg-transparent py-3 text-(--cui-color-text-muted) transition-colors hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default)"
+          className="hidden w-full shrink-0 cursor-pointer items-center justify-center border-t md:flex border-(--cui-color-stroke-default) bg-transparent py-3 text-(--cui-color-text-muted) transition-colors hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default)"
         >
           <Icon name={collapsed ? 'slide-in' : 'slide-out'} size="sm" />
         </button>

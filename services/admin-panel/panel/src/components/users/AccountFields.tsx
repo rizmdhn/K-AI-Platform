@@ -27,7 +27,8 @@ export function Notice({ tone, children }: { tone: Tone; children: ReactNode }) 
   const { box, fg, mark } = tones[tone];
   return <div role={tone === 'error' || tone === 'warning' ? 'alert' : 'status'} className={`flex items-start gap-2 rounded-md border border-l-4 px-3 py-2 text-sm leading-snug text-(--cui-color-text-default) ${box}`}>
     <span aria-hidden="true" className={`mt-px inline-flex size-4 shrink-0 items-center justify-center rounded-full border border-current text-[10px] font-bold ${fg}`}>{mark}</span>
-    <div className="flex min-w-0 flex-col gap-1">{children}</div>
+    {/* Plain block flow: a flex container would put every text run and inline link on its own line. */}
+    <div className="min-w-0">{children}</div>
   </div>;
 }
 export function ActivationLink({ invitation, reset = false }: { invitation: Invitation; reset?: boolean }) {

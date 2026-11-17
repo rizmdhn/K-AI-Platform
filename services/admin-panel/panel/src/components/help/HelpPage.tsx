@@ -35,7 +35,7 @@ export function HelpPage() {
     <div
       role="region"
       aria-label={localize('com_nav_help')}
-      className="flex flex-1 flex-col gap-6 overflow-auto p-6"
+      className="flex flex-1 flex-col gap-6 overflow-auto p-4 md:p-6"
     >
       <section aria-label={localize('com_help_resources')}>
         <h3 className="mb-3 text-sm font-medium text-(--cui-color-title-muted)">
