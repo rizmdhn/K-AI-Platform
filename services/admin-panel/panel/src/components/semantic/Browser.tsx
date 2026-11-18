@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Badge, Button } from '@clickhouse/click-ui';
+import { Button } from '@clickhouse/click-ui';
 import { useQueryClient } from '@tanstack/react-query';
 import type { SemanticDefinition, SemanticStatus } from '@/server/kaiAccounts';
 import { Notice, Select, inputClass } from '../users/AccountFields';
-import { Editor, KIND, SOURCE, STATUS, databaseOf, setStatus } from './Editor';
+import { Editor, KindTag, STATUS, StatusTag, databaseOf, setStatus } from './Editor';
 const whole = new Intl.NumberFormat('id-ID');
 const ALL = '';
 const summary = (row: SemanticDefinition) => row.definition.question || row.definition.expression || row.definition.description || '';
@@ -79,11 +79,13 @@ export function Browser({ rows, mode, canManage }: { rows: SemanticDefinition[];
         <ul className="flex max-h-[70vh] flex-col gap-1 overflow-y-auto pr-1">{shown.map(row => <li key={row.definition_id}
           className={`flex items-start gap-2 rounded-md border p-2 ${open === row.definition_id ? 'border-(--cui-color-accent-default)' : 'border-(--cui-color-stroke-default)'}`}>
           {mode === 'review' && canManage && <input type="checkbox" className="mt-1" aria-label={`Pilih ${row.name}`} checked={picked.has(row.definition_id)} onChange={() => toggle(row.definition_id)} />}
-          <button type="button" className="flex min-w-0 flex-1 flex-col gap-0.5 text-left" onClick={() => { setNotice(''); setOpen(row.definition_id); }}>
-            <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium">{row.name}<Badge text={KIND[row.kind]} state="neutral" />
-              {mode === 'all' && <Badge text={STATUS[row.status].label} state={STATUS[row.status].state} />}</span>
-            <span className={`truncate text-xs text-(--cui-color-text-muted) ${row.kind === 'metric' ? 'font-mono' : ''}`}>{summary(row)}</span>
-            <span className="truncate text-xs text-(--cui-color-text-muted)">{row.tables.join(', ')}, {SOURCE[row.source]}, {when(row.updated_at)}</span>
+          <button type="button" className="flex min-w-0 flex-1 items-start gap-3 text-left" onClick={() => { setNotice(''); setOpen(row.definition_id); }}>
+            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="truncate text-sm font-medium">{row.name}</span>
+              <span className={`truncate text-xs text-(--cui-color-text-muted) ${row.kind === 'metric' ? 'font-mono' : ''}`}>{summary(row)}</span>
+              <span className="truncate text-xs text-(--cui-color-text-muted)">{row.tables.join(', ')}, {when(row.updated_at)}</span>
+            </span>
+            <span className="flex shrink-0 flex-col items-end gap-1"><KindTag kind={row.kind} /><StatusTag row={row} /></span>
           </button>
         </li>)}</ul>
       </div>
@@ -91,7 +93,7 @@ export function Browser({ rows, mode, canManage }: { rows: SemanticDefinition[];
         {open === 'new' && <><h3 className="mb-3 font-medium">Definisi baru</h3><Editor key="new" row={null} canManage={canManage} onDone={done} /></>}
         {current && <><div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <span className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{current.name}</h3>
-            <Badge text={STATUS[current.status].label} state={STATUS[current.status].state} /><Badge text={SOURCE[current.source]} state="neutral" /></span>
+            <KindTag kind={current.kind} /><StatusTag row={current} /></span>
           {canManage && <span className="flex gap-2">
             {current.status !== 'approved' && <Button type="primary" label="Setujui" disabled={!!progress} onClick={() => void quick(current, 'approved')} />}
             {current.status !== 'rejected' && <Button type="secondary" label="Tolak" disabled={!!progress} onClick={() => void quick(current, 'rejected')} />}

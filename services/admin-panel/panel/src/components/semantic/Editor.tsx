@@ -10,6 +10,29 @@ export const STATUS: Record<SemanticStatus, { label: string; state: 'neutral' | 
 export const KIND = { metric: 'Metrik', verified_query: 'Verified query' };
 const SAVED: Record<SemanticStatus, string> = { approved: 'Disetujui. Agent memakainya dalam 1 menit.', rejected: 'Ditolak.', draft: 'Tersimpan sebagai draf.' };
 export const SOURCE = { ai: 'Draf AI', manual: 'Manual', catalog: 'Katalog' };
+/** Status as one label: AI drafts and hand-written drafts get their own colour. Dot + label, never colour alone. */
+export type Tone = 'approved' | 'draft_ai' | 'draft_manual' | 'rejected';
+export const TONE: Record<Tone, { label: string; dot: string; pill: string }> = {
+  approved: { label: 'Disetujui', dot: 'bg-emerald-500', pill: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' },
+  draft_ai: { label: 'Draf AI', dot: 'bg-violet-500', pill: 'border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300' },
+  draft_manual: { label: 'Draf manual', dot: 'bg-amber-500', pill: 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300' },
+  rejected: { label: 'Ditolak', dot: 'bg-zinc-400', pill: 'border-zinc-400/40 bg-zinc-400/10 text-zinc-600 dark:text-zinc-400' },
+};
+export function toneOf(r: Pick<SemanticDefinition, 'status' | 'source'>): Tone {
+  if (r.status !== 'draft') return r.status;
+  return r.source === 'ai' ? 'draft_ai' : 'draft_manual';
+}
+/** Kind is a square-cornered outline tag so it never reads as a status pill. */
+const KIND_STYLE = { metric: 'border-sky-500/50 text-sky-700 dark:text-sky-300', verified_query: 'border-rose-500/50 text-rose-700 dark:text-rose-300' };
+export function StatusTag({ row }: { row: Pick<SemanticDefinition, 'status' | 'source'> }) {
+  const t = TONE[toneOf(row)];
+  return <span className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${t.pill}`}>
+    <span aria-hidden="true" className={`size-1.5 rounded-full ${t.dot}`} />{t.label}</span>;
+}
+export function KindTag({ kind }: { kind: SemanticDefinition['kind'] }) {
+  return <span className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border px-1.5 py-0.5 text-xs ${KIND_STYLE[kind]}`}>
+    <span aria-hidden="true" className="font-mono">{kind === 'metric' ? 'Σ' : '{ }'}</span>{KIND[kind]}</span>;
+}
 const METRIC_TYPES = ['sum', 'count', 'count_distinct', 'average', 'min', 'max', 'ratio', 'other'];
 const EMPTY: SemanticForm = {
   kind: 'metric', name: '', status: 'draft', description: '', synonyms: [], table: '', expression: '', metric_type: 'sum',

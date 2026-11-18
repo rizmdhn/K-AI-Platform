@@ -7,7 +7,8 @@
 set -u
 MODELS=/models/gguf
 mkdir -p "$MODELS" /models/downloads
-chown "${KAI_MCP_UID:-10001}:${KAI_MCP_UID:-10001}" "$MODELS" /models/downloads
+# The MCP also writes /models/active, so it owns the folder itself, not only the two subfolders.
+chown "${KAI_MCP_UID:-10001}:${KAI_MCP_UID:-10001}" /models "$MODELS" /models/downloads
 listing() { ls -l "$MODELS" 2>/dev/null | md5sum; }
 stop() { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; exit 0; }
 trap stop TERM INT
