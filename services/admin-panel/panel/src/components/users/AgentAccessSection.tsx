@@ -5,6 +5,11 @@ import { SystemCapabilities } from '@/constants';
 import { accountSetupFn } from '@/server/kaiAccounts';
 import { agentAccessFn, assignAgentFn } from '@/server/kaiAgents';
 import { Notice, errorText } from './AccountFields';
+function blockedHint(status?: string): string {
+  if (status === 'disabled') return 'Akun nonaktif. Akses chatbot CH tidak dapat diaktifkan.';
+  if (status === 'pending') return 'Akses chatbot CH dapat diberikan setelah pengguna mengaktifkan akun.';
+  return 'Atur akses data ClickHouse terlebih dahulu.';
+}
 export function AgentAccessSection({ userId }: { userId: string }) {
   const { hasCapability } = useCapabilities();
   const client = useQueryClient();
@@ -23,7 +28,7 @@ export function AgentAccessSection({ userId }: { userId: string }) {
     {query.isPending ? <p role="status" className="text-sm text-(--cui-color-text-muted)">Memuat akses chatbot CH…</p> : query.isError ? <Notice tone="error">Akses chatbot CH tidak tersedia. Coba muat ulang.</Notice> : status && <>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!status.direct_assignment} disabled={!canManage || !status.configured || !status.agent || mutation.isPending || (status.direct_assignment ? !status.can_remove_direct : !enabled)} onChange={event => { if (status.agent) mutation.mutate({ agent_id: status.agent.id, assigned: event.target.checked }); }} />Izinkan memakai K-AI - CH</label>
       {accountDisabled && status.direct_assignment && <Notice tone="warning">Akun nonaktif ini masih punya izin chatbot CH. Hapus centang untuk mencabutnya.</Notice>}
-      {!enabled && <p className="text-sm text-(--cui-color-text-muted)">{accountDisabled ? 'Akun nonaktif. Akses chatbot CH tidak dapat diaktifkan.' : 'Atur akses data ClickHouse terlebih dahulu.'}</p>}
+      {!enabled && <p className="text-sm text-(--cui-color-text-muted)">{blockedHint(account.data?.status)}</p>}
       {(!status.configured || !status.agent) && <p className="text-sm">Chatbot CH belum tersedia. Hubungi pengelola.</p>}
       {status.inherited_access && <p className="text-sm">Akses juga berasal dari grup, role, atau kepemilikan. Menghapus penetapan langsung tidak mencabut akses tersebut.</p>}
       {status.direct_assignment && !status.can_remove_direct && <p className="text-sm">Izin ini tidak dapat dihapus dari panel ini. Hubungi pengelola.</p>}

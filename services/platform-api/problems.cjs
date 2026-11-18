@@ -42,13 +42,16 @@ function createProblems({ accounts, managedAgent, aclEntries, VIEW, USER, fetchI
         system.push({ code: "high_error_rate", calls: mcp.calls_24h, errors: mcp.errors_24h });
     }
     const active = new Set(mcp?.database_available ? mcp.active_subjects : []);
+    const verified = mcp?.credentials_verified_at ?? {};
     const flagged = [];
     for (const user of users) {
       const issues = [], usage = mcp?.users?.[user.id], last = usage?.last_error;
       if (user.status === "disabled" && user.cleanupPending) issues.push({ code: "cleanup_pending", parts: user.cleanupParts ?? [] });
       if (["active", "existing"].includes(user.status) && mcp?.database_available && viewers.has(user.id) && !active.has(user.id))
         issues.push({ code: "agent_without_binding" });
-      if (last?.outcome === "login_rejected" && !(usage.last_ok > last.at)) issues.push({ code: "ch_login_rejected", at: last.at });
+      // Resolved by a later successful call or by the admin saving working credentials after the rejection.
+      if (last?.outcome === "login_rejected" && !(usage.last_ok > last.at) && !(verified[user.id] > last.at))
+        issues.push({ code: "ch_login_rejected", at: last.at });
       if (usage?.denied >= DENIALS) issues.push({ code: "many_denials", count: usage.denied });
       if (issues.length) flagged.push({ id: user.id, name: user.name, email: user.email, issues });
     }

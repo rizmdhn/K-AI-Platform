@@ -65,7 +65,7 @@ function createAdapter({ db, mongoose, permissions, capabilities, configService,
         await beforeWrite();
         return db.updateAgent({ id: agent.id }, changes, { updatingUserId: actor.id });
       }
-      const shown = ['name', 'description', 'instructions', 'conversation_starters', 'support_contact'];
+      const shown = ['name', 'description', 'instructions', 'conversation_starters', 'support_contact', 'artifacts'];
       if (keys.length && keys.every(key => shown.includes(key))) {
         if (typeof changes.instructions === 'string' && changes.instructions.length > 8000) throw fail();
         const parsed = api.agentUpdateSchema.parse(changes);

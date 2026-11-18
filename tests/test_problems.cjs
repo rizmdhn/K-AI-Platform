@@ -11,14 +11,17 @@ const USERS = [
   { id: id("d"), name: "Dewi", email: "dewi@x", status: "active", cleanupPending: false },  // healthy
   { id: id("e"), name: "Eko", email: "eko@x", status: "active", cleanupPending: false },    // rejected earlier, ok since
   { id: id("f"), name: "Owner", email: "owner@x", status: "existing", cleanupPending: false },
+  { id: id("g"), name: "Gita", email: "gita@x", status: "active", cleanupPending: false },  // rejected, admin re-saved creds
 ];
 const MCP = {
   version: 1, audit_available: true, database_available: true, calls_24h: 30, errors_24h: 3,
-  active_subjects: [id("b"), id("d"), id("e")],
+  active_subjects: [id("b"), id("d"), id("e"), id("g")],
+  credentials_verified_at: { [id("b")]: "2026-11-09T07:00:00Z", [id("g")]: "2026-11-09T09:30:00Z" },
   checks: { binding_dsn: true, keyring: true, warehouse_target: true },
   users: {
     [id("b")]: { last_ok: "2026-11-09T08:00:00Z", last_error: { outcome: "login_rejected", at: "2026-11-09T09:00:00Z" }, errors: 6, denied: 5 },
     [id("e")]: { last_ok: "2026-11-09T10:00:00Z", last_error: { outcome: "login_rejected", at: "2026-11-09T09:00:00Z" }, errors: 1, denied: 0 },
+    [id("g")]: { last_ok: null, last_error: { outcome: "login_rejected", at: "2026-11-09T09:00:00Z" }, errors: 1, denied: 0 },
   },
 };
 const ACL = [id("a"), id("b"), id("d"), id("f")].map((u) => ({ principalType: "user", principalId: u, permBits: 1 }));

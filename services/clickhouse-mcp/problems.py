@@ -71,12 +71,19 @@ def read_audit(directory, now):
 
 
 async def _active_subjects(dsn):
+    """Active bound users -> newest credential check, in the audit stamp format (UTC)."""
     async def read(connection):
-        cursor = await connection.execute("SELECT librechat_user_id FROM kai.active_ch_bindings")
+        cursor = await connection.execute("SELECT librechat_user_id, verified_at FROM kai.active_ch_bindings")
         return await cursor.fetchall()
 
-    rows = await database.run_database(dsn, read, timeout=5)
-    return sorted({r["librechat_user_id"] for r in rows if isinstance(r.get("librechat_user_id"), str) and USER.fullmatch(r["librechat_user_id"])})
+    subjects = {}
+    for row in await database.run_database(dsn, read, timeout=5):
+        user, at = row.get("librechat_user_id"), row.get("verified_at")
+        if not isinstance(user, str) or not USER.fullmatch(user):
+            continue
+        stamp = at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if isinstance(at, datetime) else ""
+        subjects[user] = max(subjects.get(user, ""), stamp)
+    return subjects
 
 
 async def problems_request(request):
@@ -86,13 +93,15 @@ async def problems_request(request):
         return JSONResponse({"message": "Unauthorized."}, status_code=401)
     now = datetime.now(timezone.utc)
     result = {"version": 1, "audit_available": False, "database_available": False,
-              "calls_24h": 0, "errors_24h": 0, "users": {}, "active_subjects": []}
+              "calls_24h": 0, "errors_24h": 0, "users": {}, "active_subjects": [], "credentials_verified_at": {}}
     try:
         result.update(await asyncio.to_thread(read_audit, os.environ["KAI_AUDIT_LOG_DIR"], now), audit_available=True)
     except Exception:
         pass
     try:
-        result.update(active_subjects=await _active_subjects(os.environ["KAI_BINDING_DSN"]), database_available=True)
+        subjects = await _active_subjects(os.environ["KAI_BINDING_DSN"])
+        result.update(active_subjects=sorted(subjects), credentials_verified_at={u: at for u, at in subjects.items() if at},
+                      database_available=True)
     except Exception:
         pass
     try:

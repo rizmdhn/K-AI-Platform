@@ -63,7 +63,7 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         app = Starlette(routes=[Route("/p", problems.problems_request)])
         with mock.patch.dict(os.environ, env, clear=False), \
              mock.patch.object(problems, "check", return_value={"KAI_BINDING_DSN": True, "keyring": False}), \
-             mock.patch.object(problems, "_active_subjects", mock.AsyncMock(return_value=[A])):
+             mock.patch.object(problems, "_active_subjects", mock.AsyncMock(return_value={A: "2026-11-09T10:00:00Z"})):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
                 return await client.get("/p", headers=headers)
 
@@ -86,6 +86,7 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(body["audit_available"] and body["database_available"])
         self.assertEqual(body["active_subjects"], [A])
+        self.assertEqual(body["credentials_verified_at"], {A: "2026-11-09T10:00:00Z"})
         self.assertEqual(body["checks"], {"binding_dsn": True, "keyring": False, "warehouse_target": False})
         self.assertEqual(body["users"][A]["last_error"]["outcome"], "login_rejected")
         self.assertNotIn("private_password", response.text)
