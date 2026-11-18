@@ -77,11 +77,16 @@ services:
       KAI_BATCH_JOBS_PER_DAY: ${KAI_BATCH_JOBS_PER_DAY:-10}
       # Local bge-m3 for search_database_metadata; unreachable (documents profile off) = keyword ranking.
       KAI_EMBEDDINGS_URL: "${KAI_EMBEDDINGS_BASE_URL:-http://embeddings:8080/v1}/embeddings"
+      # Semantic layer drafts from the Admin Panel: local model (make llm-up); schema text never leaves the server.
+      KAI_DRAFT_MODEL_URL: ${KAI_DRAFT_MODEL_URL:-http://local-llm:8080/v1}
+      KAI_LOCAL_MODELS_DIR: /models
       # P6-11: audit lines also go to /var/log/kai/audit.jsonl, rotated daily, kept N days.
       KAI_AUDIT_LOG_DIR: /var/log/kai
       KAI_LOG_RETENTION_DAYS: ${KAI_LOG_RETENTION_DAYS:-90}
     volumes:
       - audit-logs:/var/log/kai
+      # Local model files (Admin Panel downloads them from Hugging Face, checksum-verified, then local-llm serves them).
+      - local-llm-models:/models
     networks:
       - tools_private
       - tool_egress
@@ -173,6 +178,32 @@ services:
   embeddings:
     networks:
       - embed_private
+  # Local CPU chat model for semantic layer drafts (make llm-up). llama.cpp router mode under supervise.sh; models
+  # are downloaded, activated and deleted from the Admin Panel (the MCP writes the shared volume), so this container
+  # has no internet route: embed_private only, reachable by the MCP and nothing else.
+  local-llm:
+    profiles: [local-llm]
+    image: ghcr.io/ggml-org/llama.cpp:server@sha256:c0a11067c72bb1eb330b8bddbf9869274c195e596bf4fae55fd527102e644b85
+    restart: unless-stopped
+    init: true
+    entrypoint: ["sh", "/supervise.sh"]
+    environment:
+      KAI_LOCAL_LLM_THREADS: ${KAI_LOCAL_LLM_THREADS:-4}
+      KAI_LOCAL_LLM_CONTEXT: ${KAI_LOCAL_LLM_CONTEXT:-8192}
+    volumes:
+      - ./local-llm/supervise.sh:/supervise.sh:ro
+      - local-llm-models:/models
+    networks:
+      - embed_private
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      retries: 20
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   tools_private:
@@ -186,3 +217,4 @@ networks:
 
 volumes:
   audit-logs:
+  local-llm-models:

@@ -6,6 +6,8 @@ import { SystemCapabilities } from '@/constants';
 import { createSemanticFn, deleteSemanticFn, semanticListFn, updateSemanticFn } from '@/server/kaiAccounts';
 import type { SemanticDefinition, SemanticForm, SemanticStatus } from '@/server/kaiAccounts';
 import { Notice, Select, errorText, inputClass } from './AccountFields';
+import { LocalModels } from './LocalModels';
+import { SemanticDrafts } from './SemanticDrafts';
 const STATUS: Record<SemanticStatus, { label: string; state: 'neutral' | 'success' | 'danger' }> = {
   draft: { label: 'Draf', state: 'neutral' }, approved: { label: 'Disetujui', state: 'success' }, rejected: { label: 'Ditolak', state: 'danger' },
 };
@@ -117,10 +119,12 @@ export function SemanticPanel() {
     </div>
     <div className="flex flex-col gap-2 text-sm text-(--cui-color-text-muted)">
       <p>Definisi resmi metrik (mis. &ldquo;pendapatan bersih = sum(pendapatan_rp)&rdquo;) dan verified query (pertanyaan umum beserta SQL yang sudah diperiksa). Bila pertanyaan pengguna cocok, K-AI Analis Data memakai definisi ini, jadi angkanya konsisten dan jawabannya lebih cepat.</p>
-      <p>Draf bisa dibuat AI: minta K-AI Analis Data &ldquo;buatkan draf semantic layer untuk database X&rdquo;. AI hanya membaca skema, bukan isi data. Draf baru dipakai setelah disetujui di sini. Query tetap dijalankan dengan hak akses ClickHouse masing-masing pengguna.</p>
+      <p>Draf bisa dibuat AI lokal di bawah atau ditambahkan manual. Draf baru dipakai agent setelah disetujui di sini. Query tetap dijalankan dengan hak akses ClickHouse masing-masing pengguna, jadi definisi tidak membuka data di luar hak aksesnya.</p>
     </div>
     {query.isError && <Notice tone="error">Semantic layer tidak bisa dibaca.</Notice>}
     {query.data && !query.data.storage_available && <Notice tone="warning">Penyimpanan belum disiapkan di server (jalankan make migrate).</Notice>}
+    {query.data?.storage_available && <LocalModels canManage={canManage} />}
+    {query.data?.storage_available && <SemanticDrafts canManage={canManage} />}
     {notice && <Notice tone="success">{notice}</Notice>}
     {open === 'new' && <Editor row={null} canManage={canManage} onDone={done} />}
     <label className="flex items-center gap-2 text-sm"><span className="text-(--cui-color-text-muted)">Tampilkan</span>

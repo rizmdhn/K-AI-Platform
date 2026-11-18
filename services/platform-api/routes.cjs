@@ -75,6 +75,12 @@ function installAdmin(router) {
   router.get("/kai-integrations/openmetadata/databases", handle(integrations.databases));
   router.get("/kai-integrations/:name", handle(integrations.get));
   router.put("/kai-integrations/:name", handle(integrations.save));
+  router.get("/kai-semantic/drafts", handle(integrations.semanticDrafts));
+  router.post("/kai-semantic/drafts", handle(integrations.semanticDraftStart));
+  router.delete("/kai-semantic/drafts", handle(integrations.semanticDraftStop));
+  router.get("/kai-semantic/databases", handle(integrations.semanticDatabases));
+  router.get("/kai-semantic/models", handle(integrations.localModels));
+  router.post("/kai-semantic/models/:action", handle(integrations.localModelAction));
   router.get("/kai-semantic", handle(integrations.semanticList));
   router.post("/kai-semantic", handle(integrations.semanticCreate));
   router.put("/kai-semantic/:id", handle(integrations.semanticUpdate));

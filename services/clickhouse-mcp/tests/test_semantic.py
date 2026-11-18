@@ -6,7 +6,6 @@ from unittest import mock
 import metadata_search
 import semantic
 from integration_settings import SettingsError
-from tool_errors import GatewayError
 
 METRIC = {"kind": "metric", "name": "pendapatan_bersih", "table": "kai_demo.penjualan", "expression": "sum(pendapatan_rp)",
           "metric_type": "sum", "unit": "Rupiah", "time_column": "tanggal", "dimensions": "cabang, kategori",
@@ -51,45 +50,6 @@ class CleanTests(unittest.TestCase):
                        {"sql": "SELECT * FROM system.users"}, {"question": ""}]:
             with self.subTest(change=change), self.assertRaises(SettingsError):
                 semantic.clean({**QUERY, **change})
-
-
-class ProposeTests(unittest.IsolatedAsyncioTestCase):
-    def patches(self, columns=("tanggal", "cabang", "kategori", "pendapatan_rp"), explain=None):
-        schema = json.dumps({"columns": [{"name": c} for c in columns]})
-        saved = []
-        return saved, [
-            mock.patch.object(semantic, "get_table_schema", mock.AsyncMock(return_value=schema)),
-            mock.patch.object(semantic, "run_query_async", mock.AsyncMock(side_effect=explain)),
-            mock.patch.object(semantic, "save_draft", lambda cleaned, user: saved.append((cleaned, user))),
-            mock.patch.object(semantic, "get_http_headers", lambda: {"x-librechat-user-id": "a" * 24}),
-        ]
-
-    async def call(self, patches, **args):
-        for p in patches:
-            p.start()
-            self.addCleanup(p.stop)
-        return await semantic.propose_semantic_definition(**args)
-
-    async def test_valid_metric_is_explained_and_saved_as_draft_for_the_proposer(self):
-        saved, patches = self.patches()
-        result = json.loads(await self.call(patches, **{**METRIC, "dimensions": ["cabang", "kategori"]}))
-        self.assertEqual(result["saved"], "draft")
-        self.assertEqual(saved[0][1], "a" * 24)
-        semantic.run_query_async.assert_awaited_once_with(
-            "EXPLAIN SELECT sum(pendapatan_rp) AS pendapatan_bersih FROM kai_demo.penjualan")
-
-    async def test_unknown_column_or_clickhouse_rejection_is_reported_not_saved(self):
-        saved, patches = self.patches(columns=("tanggal",))
-        with self.assertRaises(GatewayError) as caught:
-            await self.call(patches, **{**METRIC, "dimensions": ["cabang"]})
-        self.assertIn("cabang", str(caught.exception))
-        saved, patches = self.patches(explain=RuntimeError("Unknown identifier"))
-        for p in patches:
-            p.start()
-            self.addCleanup(p.stop)
-        with self.assertRaises(GatewayError):
-            await semantic.propose_semantic_definition(**{**METRIC, "dimensions": []})
-        self.assertEqual(saved, [])
 
 
 class SearchTests(unittest.TestCase):

@@ -74,3 +74,18 @@ test("semantic layer: session editor id, known fields only, write needs manage:c
   await assert.rejects(viewer.api.semanticCreate(req({ kind: "metric" })), { status: 403 });
   await assert.rejects(viewer.api.semanticDelete(req({}, { id })), { status: 403 });
 });
+
+test("local models: viewers read state; actions need manage:configs and only known actions/models are forwarded", async () => {
+  const { api, calls } = build();
+  const req = (body, params = {}) => ({ user: { id: ADMIN, role: "ADMIN" }, params, body });
+  await api.localModelAction(req({ model: "Qwen2.5-Coder-7B-Instruct-Q4_K_M", path: "/etc" }, { action: "download" }));
+  assert.match(calls[0].url, /semantic\/models\/download$/);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { model: "Qwen2.5-Coder-7B-Instruct-Q4_K_M" });
+  await api.localModelAction(req({}, { action: "pause" }));
+  assert.equal(calls[1].init.method, "DELETE");
+  await assert.rejects(api.localModelAction(req({ model: "x" }, { action: "shell" })), { status: 404 });
+  await assert.rejects(api.localModelAction(req({}, { action: "delete" })), { status: 400 });
+  const viewer = build(["access:admin", "read:configs"]);
+  await viewer.api.localModels(req());
+  await assert.rejects(viewer.api.localModelAction(req({ model: "x" }, { action: "activate" })), { status: 403 });
+});

@@ -62,6 +62,25 @@ function createIntegrations({ hasCapability, fetchImpl = fetch }) {
     semanticCreate: async (req) => { const id = await allowed(req, true); return mcp("", "POST", { ...semanticForm(req.body), updated_by: id }, SEMANTIC); },
     semanticUpdate: async (req) => { const path = definition(req); const id = await allowed(req, true); return mcp(path, "PUT", { ...semanticForm(req.body), updated_by: id }, SEMANTIC); },
     semanticDelete: async (req) => { const path = definition(req); const id = await allowed(req, true); return mcp(path, "DELETE", { updated_by: id }, SEMANTIC); },
+    /** AI draft job (local model): status for viewers; start/stop and the database list use the admin's own CH access. */
+    semanticDrafts: async (req) => { await allowed(req, false); return mcp("/drafts", "GET", undefined, SEMANTIC); },
+    semanticDraftStart: async (req) => {
+      const id = await allowed(req, true);
+      if (typeof req.body?.database !== "string") throw new AccountError("Pilih database.");
+      return mcp("/drafts", "POST", { database: req.body.database, updated_by: id }, SEMANTIC);
+    },
+    semanticDraftStop: async (req) => { await allowed(req, true); return mcp("/drafts", "DELETE", {}, SEMANTIC); },
+    /** Local model manager (catalog download with checksum, pause/resume, activate, delete); viewing needs read:configs. */
+    localModels: async (req) => { await allowed(req, false); return mcp("/models", "GET", undefined, SEMANTIC); },
+    localModelAction: async (req) => {
+      await allowed(req, true);
+      const action = req.params?.action;
+      if (!["download", "pause", "activate", "delete"].includes(action)) throw new AccountError("Tindakan tidak dikenal.", 404);
+      if (action === "pause") return mcp("/models/download", "DELETE", {}, SEMANTIC);
+      if (typeof req.body?.model !== "string") throw new AccountError("Pilih model.");
+      return mcp(`/models/${action}`, "POST", { model: req.body.model }, SEMANTIC);
+    },
+    semanticDatabases: async (req) => { const id = await allowed(req, true); return mcp(`/databases?user=${id}`, "GET", undefined, SEMANTIC); },
     testSmtp: async (req) => {
       await allowed(req, true);
       if (typeof req.body?.to !== "string") throw new AccountError("Isi alamat email tujuan.");

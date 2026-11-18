@@ -9,7 +9,7 @@ $(error KAI_DOMAIN harus hostname atau alamat IPv4, tanpa https:// atau path)
 endif
 COMPOSE = docker compose --project-name kai --project-directory deploy --env-file .env -f deploy/upstream/docker-compose.yml -f deploy/docker-compose.override.yml $(MCP_OVERLAY) $(TLS_OVERLAY)
 
-.PHONY: setup preflight check up down logs ps migrate test mcp-test mcp-image admin-create backup embeddings-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup agents-transfer warehouse-local-check warehouse-local-setup evals smoke-config browser-warehouse-test worker-test rag-acl-test openmetadata-check
+.PHONY: setup preflight check up down logs ps migrate test mcp-test mcp-image admin-create backup embeddings-up llm-up documents-up mcp-up admin-up managed-chat metrics-up metrics binding-check agents-check agents-setup agents-transfer warehouse-local-check warehouse-local-setup evals smoke-config browser-warehouse-test worker-test rag-acl-test openmetadata-check
 
 setup:
 	python3 scripts/bootstrap.py
@@ -51,6 +51,11 @@ backup:
 # Local CPU embedding server (documents profile); the first start downloads the model (~635 MB) once.
 embeddings-up: check
 	$(COMPOSE) --profile documents up -d --wait --wait-timeout 900 embeddings
+
+# Local CPU model server for semantic layer drafts. Models are downloaded, activated and deleted in the Admin Panel
+# (Integrasi → Semantic layer → Model AI lokal); this only starts the server, it downloads nothing.
+llm-up: check
+	$(COMPOSE) --profile local-llm up -d --wait --wait-timeout 300 local-llm
 
 # Local RAG stack: embeddings + pgvector + rag_api, then point api at it (KAI_RAG_API_URL, kept if already set).
 documents-up: embeddings-up

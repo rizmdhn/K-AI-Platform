@@ -114,6 +114,16 @@ class MCPComposeTests(unittest.TestCase):
         self.assertEqual(config["services"]["vectordb"]["profiles"], ["documents"])
         self.assertNotIn("rag_api", config["services"]["api"].get("depends_on", {}))
 
+    def test_local_model_server_has_no_internet_route_and_shares_models_with_the_mcp_only(self):
+        config = render()
+        llm = config["services"]["local-llm"]
+        self.assertEqual(set(llm["networks"]), {"embed_private"})  # downloads go through the MCP, never this container
+        self.assertEqual(llm["profiles"], ["local-llm"])
+        self.assertFalse(llm.get("ports"))
+        holders = {name for name, service in config["services"].items()
+                   if any(v.get("source") == "local-llm-models" for v in service.get("volumes", []))}
+        self.assertEqual(holders, {"clickhouse-mcp", "local-llm"})
+
     def test_private_service_has_only_api_network_and_egress(self):
         config = render()
         mcp = config["services"]["clickhouse-mcp"]
@@ -122,7 +132,7 @@ class MCPComposeTests(unittest.TestCase):
         self.assertTrue(config["networks"]["embed_private"]["internal"])
         self.assertEqual(
             {name for name, service in config["services"].items() if "embed_private" in service.get("networks", {})},
-            {"clickhouse-mcp", "embeddings"},
+            {"clickhouse-mcp", "embeddings", "local-llm"},  # local model servers, no tools_private
         )
         self.assertTrue(config["networks"]["tools_private"]["internal"])
         # vertex-proxy (internet egress) shares an internal network with api only, never with the MCP.

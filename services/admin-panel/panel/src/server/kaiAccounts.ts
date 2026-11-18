@@ -156,3 +156,41 @@ export const updateSemanticFn = createServerFn({ method: 'POST' }).inputValidato
   .handler(async ({ data }): Promise<SemanticDefinition> => call(`/api/admin/users/kai-semantic/${data.id}`, SystemCapabilities.MANAGE_CONFIGS, 'PUT', data.form));
 export const deleteSemanticFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id: definitionId }).strict())
   .handler(async ({ data }): Promise<SemanticDefinition> => call(`/api/admin/users/kai-semantic/${data.id}`, SystemCapabilities.MANAGE_CONFIGS, 'DELETE', {}));
+
+// AI draft job (local model on the server). Status is readable with read:configs; start/stop need manage:configs.
+export type DraftModelStatus = 'ready' | 'no_model' | 'loading' | 'failed' | 'unavailable' | 'not_configured';
+export interface SemanticJob {
+  id: string; status: 'running' | 'done' | 'failed' | 'cancelled'; database: string; started_by: string; started_at: string; finished_at: string | null;
+  phase: string | null; current: string[]; tables_total: number; tables_existing: number; tables_wide: number; tables_done: number;
+  groups_total: number; groups_done: number; drafts_saved: number; drafts_skipped: number; issues: { item: string; reason: string }[];
+  seconds_per_group: number | null; eta_seconds: number | null; message: string | null; model: string;
+}
+export interface SemanticDraftState { job: SemanticJob | null; model: { status: DraftModelStatus; name: string } }
+export interface SemanticDatabase { name: string; tables: number; covered: number }
+export const semanticDraftsFn = createServerFn({ method: 'GET' })
+  .handler(async (): Promise<SemanticDraftState> => call('/api/admin/users/kai-semantic/drafts', SystemCapabilities.READ_CONFIGS));
+export const startSemanticDraftsFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ database: z.string().min(1).max(128) }).strict())
+  .handler(async ({ data }): Promise<SemanticDraftState> => call('/api/admin/users/kai-semantic/drafts', SystemCapabilities.MANAGE_CONFIGS, 'POST', data));
+export const stopSemanticDraftsFn = createServerFn({ method: 'POST' })
+  .handler(async (): Promise<SemanticDraftState> => call('/api/admin/users/kai-semantic/drafts', SystemCapabilities.MANAGE_CONFIGS, 'DELETE', {}));
+export const semanticDatabasesFn = createServerFn({ method: 'GET' })
+  .handler(async (): Promise<{ databases: SemanticDatabase[] }> => call('/api/admin/users/kai-semantic/databases', SystemCapabilities.MANAGE_CONFIGS));
+
+// Local model manager: curated catalog, checksum-verified downloads (pause/resume), activate, delete.
+export interface LocalModel {
+  id: string; label: string; size: number; ram_gb: number | null; note: string; source: 'catalog' | 'manual'; installed: boolean;
+  partial_bytes: number; active: boolean; router_status: string | null; load_progress: number | null;
+}
+export interface LocalModelDownload {
+  model: string; label: string; status: 'running' | 'paused' | 'done' | 'failed'; phase: string | null; bytes: number; total: number;
+  speed: number | null; eta_seconds: number | null; message: string | null;
+}
+export interface LocalModelState {
+  models: LocalModel[]; active: string | null; router: 'ready' | 'unavailable' | 'not_configured'; download: LocalModelDownload | null;
+  disk: { free: number; total: number } | null; message: string | null;
+}
+export const localModelsFn = createServerFn({ method: 'GET' })
+  .handler(async (): Promise<LocalModelState> => call('/api/admin/users/kai-semantic/models', SystemCapabilities.READ_CONFIGS));
+export const localModelActionFn = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ action: z.enum(['download', 'pause', 'activate', 'delete']), model: z.string().max(128).optional() }).strict())
+  .handler(async ({ data }): Promise<LocalModelState> => call(`/api/admin/users/kai-semantic/models/${data.action}`, SystemCapabilities.MANAGE_CONFIGS, 'POST', { model: data.model }));

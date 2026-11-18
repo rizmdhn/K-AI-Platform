@@ -78,7 +78,7 @@ mcpServers:
       To find which tables fit a question, call search_database_metadata first instead of listing every table.
       To find rows whose text means something similar (e.g. similar complaints), use search_rows_by_meaning.
       To document tables, draft descriptions and format them with suggest_comment_sql; a DBA applies them.
-      A "semantic" entry in search results is an approved metric or verified query: reuse its SQL. Draft new ones with propose_semantic_definition; an admin approves them.
+      A "semantic" entry in search results is an approved metric or verified query: reuse its SQL.
       Databases follow a medallion layout: prefer gold (aggregates), then silver (clean rows); avoid bronze (raw).
       Answer counts, totals and trends with SQL aggregates (GROUP BY) before any AI labelling.
       For sentiment/classification over more than 1000 rows use start_row_labeling, then get_row_labeling_job; above 5000 rows it labels a random sample, so report estimates with the margin of error.

@@ -1,7 +1,7 @@
 """Semantic layer: approved metric definitions and verified queries the CH agent reuses instead of inventing SQL.
 
-Rows live in kai.semantic_definitions (kai_catalog role, KAI_CATALOG_DSN). Drafts come from the agent
-(propose_semantic_definition, validated against the proposer's own ClickHouse view) or the Admin Panel; only
+Rows live in kai.semantic_definitions (kai_catalog role, KAI_CATALOG_DSN). Drafts come from the local-model job
+(semantic_drafts.py, validated against the requesting admin's own ClickHouse view) or the Admin Panel form; only
 'approved' rows reach search_database_metadata, and only for callers whose grants cover every referenced table.
 SQL is never run from here on anyone's behalf: the agent executes it with execute_readonly_sql as the caller, so
 grants and row policies still apply. Field names follow OpenMetadata (see db/migrations/012) for a later sync.
@@ -14,16 +14,12 @@ import re
 import time
 
 import sqlglot
-from fastmcp.server.dependencies import get_http_headers
-from mcp_clickhouse.mcp_server import run_query_async
 from sqlglot import exp
 from starlette.responses import JSONResponse
 
 from integration_settings import SettingsError, _authorized, _body, _connect
-from schema_tool import get_table_schema
 from sql_policy import UnsafeSQL
 from sql_policy import validate as validate_sql
-from tool_errors import GatewayError
 
 KINDS = ("metric", "verified_query")
 STATUSES = ("draft", "approved", "rejected")
@@ -34,7 +30,7 @@ TABLE = re.compile(r"([A-Za-z0-9_-]{1,128})\.([A-Za-z0-9_-]{1,128})")
 USER = re.compile(r"[0-9a-f]{24}")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 MAX_TEXT, MAX_EXPRESSION, MAX_SQL, MAX_LIST = 500, 1000, 4000, 30
-MAX_DRAFTS = 1000  # caps agent drafts waiting for review, so a runaway conversation cannot flood the queue
+MAX_DRAFTS = 2000  # caps AI drafts waiting for review, so repeated jobs cannot flood the queue
 CACHE_SECONDS = 60  # an approval reaches the agent within a minute
 COLUMNS = ("definition_id", "kind", "name", "tables", "definition", "status", "source", "external_id",
            "proposed_by", "updated_by", "created_at", "updated_at")
@@ -186,7 +182,7 @@ def delete(definition_id, env=os.environ):
 
 
 def save_draft(cleaned, user, env=os.environ):
-    """Agent draft: new row, or a refresh of an existing draft. Approved/rejected rows are a reviewer's decision."""
+    """AI draft: new row, or a refresh of an existing draft. Approved/rejected rows are a reviewer's decision."""
     kind, name, tables, definition = cleaned
     if not env.get("KAI_CATALOG_DSN"):
         raise SettingsError("Penyimpanan semantic layer belum disiapkan. Hubungi administrator.")
@@ -194,12 +190,11 @@ def save_draft(cleaned, user, env=os.environ):
         existing = connection.execute("SELECT status FROM kai.semantic_definitions WHERE kind=%s AND name=%s",
                                       (kind, name)).fetchone()
         if existing and existing[0] != "draft":
-            raise SettingsError(f"'{name}' sudah {'disetujui' if existing[0] == 'approved' else 'ditolak'} admin; "
-                                "pakai nama lain atau minta admin mengubahnya di Admin Panel.")
+            raise SettingsError(f"nama sudah {'disetujui' if existing[0] == 'approved' else 'ditolak'} sebelumnya")
         if not existing:
             drafts = connection.execute("SELECT count(*) FROM kai.semantic_definitions WHERE status='draft'").fetchone()[0]
             if drafts >= MAX_DRAFTS:
-                raise SettingsError(f"Sudah ada {MAX_DRAFTS} draf menunggu tinjauan. Minta admin meninjaunya dulu.")
+                raise SettingsError(f"sudah ada {MAX_DRAFTS} draf menunggu tinjauan")
     if existing:
         row = _select(env, "WHERE kind=%s AND name=%s", (kind, name))[0]
         return update(row["definition_id"], cleaned, "draft", user, env)
@@ -232,52 +227,6 @@ def for_agent(row):
     return {"kind": "metric", "name": row["name"], "description": d.get("description") or None,
             "sql": metric_sql(row["name"], d, row["tables"][0]), "unit": d.get("unit") or None,
             "time_column": d.get("time_column") or None, "dimensions": d.get("dimensions") or None}
-
-
-async def propose_semantic_definition(
-    kind: str, name: str, description: str = "", table: str = "", expression: str = "", metric_type: str = "other",
-    unit: str = "", time_column: str = "", dimensions: list[str] | None = None, filter: str = "",
-    synonyms: list[str] | None = None, question: str = "", sql: str = "",
-) -> str:
-    """Save a DRAFT semantic definition for admin review: a metric (kind=metric: table as database.table, expression
-    as the aggregate formula e.g. sum(pendapatan_rp), metric_type, unit, time_column, dimensions, optional filter)
-    or a verified query (kind=verified_query: question and one read-only SQL with database.table names).
-
-    Checked against your own ClickHouse view (tables, columns, EXPLAIN); nothing is executed. Drafts are not used
-    until an admin approves them in the Admin Panel. Never put example values or personal data in synonyms/text.
-    """
-    try:
-        cleaned = clean({"kind": kind, "name": name, "description": description, "table": table,
-                         "expression": expression, "metric_type": metric_type, "unit": unit,
-                         "time_column": time_column, "dimensions": dimensions or [], "filter": filter,
-                         "synonyms": synonyms or [], "question": question, "sql": sql})
-    except SettingsError as error:
-        raise GatewayError("INVALID_ARGUMENT", str(error)) from None
-    _, _, tables, definition = cleaned
-    for ref in tables:
-        database, table_name = TABLE.fullmatch(ref).groups()
-        schema = json.loads(await get_table_schema(database, table_name))  # ACCESS_DENIED when not visible
-        if kind == "metric":
-            columns = {c["name"] for c in schema["columns"]}
-            missing = [c for c in [definition["time_column"], *definition["dimensions"]] if c and c not in columns]
-            if missing:
-                raise GatewayError("INVALID_ARGUMENT", f"Kolom tidak ada di {ref}: {', '.join(missing)}.")
-    query = metric_sql(name, definition, tables[0]) if kind == "metric" else definition["sql"]
-    try:
-        await run_query_async(f"EXPLAIN {query}")  # resolves tables and columns as the caller, reads no rows
-    except Exception:
-        raise GatewayError("INVALID_ARGUMENT", "ClickHouse menolak SQL ini (kolom, fungsi atau hak akses). "
-                           "Periksa dengan get_table_schema lalu perbaiki.") from None
-    user = (get_http_headers() or {}).get("x-librechat-user-id", "").strip()
-    try:
-        await asyncio.to_thread(save_draft, cleaned, user if USER.fullmatch(user) else None)
-    except SettingsError as error:
-        raise GatewayError("INVALID_ARGUMENT", str(error)) from None
-    except Exception:
-        raise GatewayError("DEPENDENCY_UNAVAILABLE", "Draf tidak bisa disimpan sekarang. Coba lagi nanti.") from None
-    return json.dumps({"saved": "draft", "kind": kind, "name": name,
-                       "message": "Draf tersimpan. Admin perlu menyetujuinya di Admin Panel → Integrasi → "
-                                  "Semantic layer sebelum dipakai."}, ensure_ascii=False)
 
 
 def _status(body):
