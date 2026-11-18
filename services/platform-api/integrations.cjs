@@ -1,14 +1,19 @@
-// Admin Panel settings sections (OpenMetadata, batch model, limits, SMTP, pricing). Viewing needs read:configs, saving/testing
+// Admin Panel settings sections (OpenMetadata, batch model, limits, SMTP, pricing) and the semantic layer. Viewing needs read:configs, saving/testing
 // manage:configs. Proxies the MCP's internal routes; the editor id comes from the session. Secrets go in, never out.
 const { AccountError } = require("./accounts.cjs");
 const MCP = "http://clickhouse-mcp:8000/v1/internal/integrations/";
 const MAIL = "http://clickhouse-mcp:8000/v1/internal/mail";
+const SEMANTIC = "http://clickhouse-mcp:8000/v1/internal/semantic";
+// Semantic layer form fields; the MCP validates them (SQL safety, names) and keeps only what the kind uses.
+const SEMANTIC_FIELDS = ["kind", "name", "status", "description", "synonyms", "table", "expression", "metric_type", "unit",
+  "time_column", "dimensions", "filter", "question", "sql"];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SECTIONS = {
   openmetadata: ["url", "service", "token", "ca_cert", "catalog_enabled", "databases", "scan_hours", "max_tables"],
   batch_model: ["enabled", "base_url", "model", "api_key", "jobs_per_day", "sample_rows"],
   limits: ["max_execution_seconds", "max_memory_gb", "max_rows_million", "max_read_gb", "log_retention_days"],
   smtp: ["host", "port", "security", "username", "password", "from", "from_name"],
-  pricing: ["input_usd_per_million", "output_usd_per_million", "usd_to_idr"],
+  pricing: ["input_usd_per_million", "cached_input_usd_per_million", "output_usd_per_million", "usd_to_idr"],
 };
 
 function createIntegrations({ hasCapability, fetchImpl = fetch }) {
@@ -42,12 +47,21 @@ function createIntegrations({ hasCapability, fetchImpl = fetch }) {
     if (!Object.hasOwn(SECTIONS, name)) throw new AccountError("Bagian pengaturan tidak dikenal.", 404);
     return name;
   };
+  const definition = (req) => {
+    if (!UUID.test(String(req.params?.id ?? ""))) throw new AccountError("Definisi tidak ditemukan.", 404);
+    return `/${req.params.id}`;
+  };
+  const semanticForm = (body) => Object.fromEntries(SEMANTIC_FIELDS.filter((k) => body && Object.hasOwn(body, k)).map((k) => [k, body[k]]));
   const form = (name, body) => Object.fromEntries(SECTIONS[name].filter((k) => body && Object.hasOwn(body, k)).map((k) => [k, body[k]]));
   return {
     get: async (req) => { const name = section(req); await allowed(req, false); return mcp(name, "GET"); },
     save: async (req) => { const name = section(req); const id = await allowed(req, true); return mcp(name, "PUT", { ...form(name, req.body), updated_by: id }); },
     test: async (req) => { await allowed(req, true); return mcp("openmetadata/test", "POST", form("openmetadata", req.body)); },
     databases: async (req) => { await allowed(req, false); return mcp("openmetadata/databases", "GET"); },
+    semanticList: async (req) => { await allowed(req, false); return mcp("", "GET", undefined, SEMANTIC); },
+    semanticCreate: async (req) => { const id = await allowed(req, true); return mcp("", "POST", { ...semanticForm(req.body), updated_by: id }, SEMANTIC); },
+    semanticUpdate: async (req) => { const path = definition(req); const id = await allowed(req, true); return mcp(path, "PUT", { ...semanticForm(req.body), updated_by: id }, SEMANTIC); },
+    semanticDelete: async (req) => { const path = definition(req); const id = await allowed(req, true); return mcp(path, "DELETE", { updated_by: id }, SEMANTIC); },
     testSmtp: async (req) => {
       await allowed(req, true);
       if (typeof req.body?.to !== "string") throw new AccountError("Isi alamat email tujuan.");

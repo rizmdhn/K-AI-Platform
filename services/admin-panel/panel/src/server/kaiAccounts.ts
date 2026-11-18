@@ -76,14 +76,14 @@ export const problemsFn = createServerFn({ method: 'GET' })
   .handler(async (): Promise<Problems> => call('/api/admin/users/kai-problems', SystemCapabilities.READ_USERS));
 
 // Token usage from LibreChat transactions; usd is null until prices are saved under Integrasi.
-export interface UsageTotals { prompt: number; completion: number; calls: number; usd: number | null }
+export interface UsageTotals { prompt: number; cached: number; completion: number; calls: number; usd: number | null }
 export interface UsageSummary {
   days: number; since: string; user_count: number; total: UsageTotals; previous: UsageTotals;
-  pricing: { priced: boolean; input_usd_per_million: number | null; output_usd_per_million: number | null; usd_to_idr: number | null };
+  pricing: { priced: boolean; input_usd_per_million: number | null; cached_input_usd_per_million: number | null; output_usd_per_million: number | null; usd_to_idr: number | null };
   users: (UsageTotals & { id: string; name: string | null; email: string | null })[];
   models: (UsageTotals & { model: string })[];
   bucket: 'hour' | 'day';
-  daily: { day: string; prompt: number; completion: number; calls: number }[];
+  daily: (UsageTotals & { day: string })[];
 }
 const usageDays = z.union([z.literal(1), z.literal(7), z.literal(30), z.literal(90)]);
 export const usageFn = createServerFn({ method: 'GET' }).inputValidator(z.object({ days: usageDays }).strict())
@@ -129,3 +129,30 @@ export const saveSettingsSectionFn = createServerFn({ method: 'POST' }).inputVal
   .handler(async ({ data }): Promise<SectionState> => call(`/api/admin/users/kai-integrations/${data.name}`, SystemCapabilities.MANAGE_CONFIGS, 'PUT', data.values));
 export const testSmtpFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ to: z.string().trim().email().max(254) }).strict())
   .handler(async ({ data }): Promise<{ sent: boolean }> => call('/api/admin/users/kai-integrations/smtp/test', SystemCapabilities.MANAGE_CONFIGS, 'POST', data));
+
+// Semantic layer (metrics and verified queries the CH agent reuses). Drafts come from the agent or this panel;
+// only approved ones reach the agent. The MCP validates SQL safety and names; these limits only bound the request.
+export type SemanticKind = 'metric' | 'verified_query';
+export type SemanticStatus = 'draft' | 'approved' | 'rejected';
+export interface SemanticDefinition {
+  definition_id: string; kind: SemanticKind; name: string; tables: string[]; status: SemanticStatus; source: 'ai' | 'manual' | 'catalog';
+  definition: { description?: string; synonyms?: string[]; expression?: string; metric_type?: string; unit?: string; time_column?: string; dimensions?: string[]; filter?: string; question?: string; sql?: string };
+  external_id: string | null; proposed_by: string | null; updated_by: string | null; created_at: string | null; updated_at: string | null;
+}
+const words = z.array(z.string().max(128)).max(30);
+const semanticForm = z.object({
+  kind: z.enum(['metric', 'verified_query']), name: z.string().max(64), status: z.enum(['draft', 'approved', 'rejected']),
+  description: z.string().max(500), synonyms: words, table: z.string().max(260), expression: z.string().max(1000),
+  metric_type: z.string().max(32), unit: z.string().max(40), time_column: z.string().max(128), dimensions: words,
+  filter: z.string().max(500), question: z.string().max(500), sql: z.string().max(4000),
+}).strict();
+export type SemanticForm = z.infer<typeof semanticForm>;
+const definitionId = z.string().uuid();
+export const semanticListFn = createServerFn({ method: 'GET' })
+  .handler(async (): Promise<{ definitions: SemanticDefinition[]; storage_available: boolean }> => call('/api/admin/users/kai-semantic', SystemCapabilities.READ_CONFIGS));
+export const createSemanticFn = createServerFn({ method: 'POST' }).inputValidator(semanticForm)
+  .handler(async ({ data }): Promise<SemanticDefinition> => call('/api/admin/users/kai-semantic', SystemCapabilities.MANAGE_CONFIGS, 'POST', data));
+export const updateSemanticFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id: definitionId, form: semanticForm }).strict())
+  .handler(async ({ data }): Promise<SemanticDefinition> => call(`/api/admin/users/kai-semantic/${data.id}`, SystemCapabilities.MANAGE_CONFIGS, 'PUT', data.form));
+export const deleteSemanticFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id: definitionId }).strict())
+  .handler(async ({ data }): Promise<SemanticDefinition> => call(`/api/admin/users/kai-semantic/${data.id}`, SystemCapabilities.MANAGE_CONFIGS, 'DELETE', {}));

@@ -1,5 +1,7 @@
 // Token usage and cost estimate for the admin dashboard, read from LibreChat's own `transactions`
 // (one prompt row and one completion row per model call, rawAmount negative). Read-only, no chat content.
+// Prompt rows carry readTokens when the provider served part of the prompt from its cache (Vertex implicit caching);
+// rawAmount already includes them, so `cached` is the share of `prompt` billed at the cached-input price.
 const { AccountError } = require("./accounts.cjs");
 const PERIODS = new Set([1, 7, 30, 90]);
 const TOP_USERS = 20;
@@ -48,29 +50,32 @@ function createUsage({ hasCapability, aggregate, findUsers, pricing, now = () =>
         { $group: {
           _id: { user: "$user", model: "$model", type: "$tokenType",
                  day: { $dateToString: { format, date: "$createdAt", timezone: timeZone } } },
-          tokens: { $sum: { $abs: "$rawAmount" } }, calls: { $sum: 1 } } },
+          tokens: { $sum: { $abs: "$rawAmount" } }, cached: { $sum: { $abs: { $ifNull: ["$readTokens", 0] } } }, calls: { $sum: 1 } } },
       ]),
       pricing(),
       aggregate([
         { $match: { createdAt: { $gte: previousSince, $lt: since }, tokenType: { $in: ["prompt", "completion"] } } },
-        { $group: { _id: "$tokenType", tokens: { $sum: { $abs: "$rawAmount" } }, calls: { $sum: 1 } } },
+        { $group: { _id: "$tokenType", tokens: { $sum: { $abs: "$rawAmount" } }, cached: { $sum: { $abs: { $ifNull: ["$readTokens", 0] } } }, calls: { $sum: 1 } } },
       ]),
     ]);
-    const previous = { prompt: 0, completion: 0, calls: 0 };
-    for (const { _id, tokens, calls } of previousRows) {
-      if (_id === "prompt") previous.prompt += tokens;
+    const previous = { prompt: 0, cached: 0, completion: 0, calls: 0 };
+    for (const { _id, tokens, cached = 0, calls } of previousRows) {
+      if (_id === "prompt") { previous.prompt += tokens; previous.cached += cached; }
       else { previous.completion += tokens; previous.calls += calls; }
     }
     const price = (key) => (prices?.[key] === "" || prices?.[key] == null ? null : Number(prices[key]));
     const input = price("input_usd_per_million"), output = price("output_usd_per_million"), rate = price("usd_to_idr");
+    const cachedInput = price("cached_input_usd_per_million") ?? input;  // no cached price saved: no discount assumed
     const priced = input != null && output != null;
-    const cost = (t) => (priced ? (t.prompt * input + t.completion * output) / 1e6 : null);
-    const bucket = (map, key) => map.get(key) ?? map.set(key, { prompt: 0, completion: 0, calls: 0 }).get(key);
-    const total = { prompt: 0, completion: 0, calls: 0 }, users = new Map(), models = new Map(), daily = new Map();
-    for (const { _id, tokens, calls } of rows) {
+    const cost = (t) => (priced ? ((t.prompt - t.cached) * input + t.cached * cachedInput + t.completion * output) / 1e6 : null);
+    const empty = () => ({ prompt: 0, cached: 0, completion: 0, calls: 0 });
+    const bucket = (map, key) => map.get(key) ?? map.set(key, empty()).get(key);
+    const total = empty(), users = new Map(), models = new Map(), daily = new Map();
+    for (const { _id, tokens, cached = 0, calls } of rows) {
       const type = _id.type === "prompt" ? "prompt" : "completion";
       for (const t of [total, bucket(users, String(_id.user)), bucket(models, _id.model || "-"), bucket(daily, _id.day)]) {
         t[type] += tokens;
+        if (type === "prompt") t.cached += cached;
         if (type === "completion") t.calls += calls;  // one completion row per model call
       }
     }
@@ -80,13 +85,13 @@ function createUsage({ hasCapability, aggregate, findUsers, pricing, now = () =>
     const withCost = (t) => ({ ...t, usd: cost(t) });
     return {
       days, since: since.toISOString(),
-      pricing: { priced, input_usd_per_million: input, output_usd_per_million: output, usd_to_idr: rate },
+      pricing: { priced, input_usd_per_million: input, cached_input_usd_per_million: price("cached_input_usd_per_million"), output_usd_per_million: output, usd_to_idr: rate },
       total: withCost(total), previous: withCost(previous),
       users: top.map(([id, t]) => ({ id, name: people.get(id)?.name || null, email: people.get(id)?.email || null, ...withCost(t) })),
       user_count: users.size,
       models: [...models].map(([model, t]) => ({ model, ...withCost(t) })).sort((a, b) => b.prompt + b.completion - (a.prompt + a.completion)),
       bucket: days === 1 ? "hour" : "day",
-      daily: keys.map((day) => ({ day, ...(daily.get(day) ?? { prompt: 0, completion: 0, calls: 0 }) })),
+      daily: keys.map((day) => ({ day, ...withCost(daily.get(day) ?? empty()) })),
     };
   }
   return { summary };

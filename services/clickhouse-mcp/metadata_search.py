@@ -22,6 +22,7 @@ import time
 from mcp_clickhouse import clients
 from mcp_clickhouse.mcp_server import run_query_async
 
+import semantic
 from openmetadata import approved_metadata
 from tool_errors import GatewayError
 
@@ -44,6 +45,9 @@ COLUMNS_SQL = (
 LAYER_WEIGHT = {"gold": 1.0, "silver": 0.9, "bronze": 0.6, "raw": 0.6}
 NOISE = re.compile(r"(_coba|_dulu|_tmp|_temp|_test|_try|_snap|_bak|_backup|_old|_copy|_\d{2,})(_|$)", re.I)
 MAX_DESCRIPTION_CHARS = 1500  # embedding time grows with length; name, comment and the first columns carry the meaning
+MAX_DEFINITIONS = 3
+# ponytail: fixed cut-offs; bge-m3 puts unrelated Indonesian text around 0.3-0.4. Tune if the agent gets noise.
+DEFINITION_MIN_SCORE = {"semantic": 0.5, "keyword": 0.01}
 EMBED_BATCH = 8  # a query embedding queued behind background work waits for at most one small batch
 QUERY_EMBED_TIMEOUT = 15
 _cache = {}  # text -> float32 vector (array, ~4 KB for bge-m3 instead of ~32 KB as a list)
@@ -181,7 +185,8 @@ async def search_database_metadata(query: str, limit: int = 5) -> str:
     """Find the tables most relevant to a question among those your ClickHouse account can see.
 
     Use this before writing SQL when you do not know which table holds the data. Returns table names,
-    comments and columns; follow up with get_table_schema for exact types.
+    comments and columns; follow up with get_table_schema for exact types. When the data team approved a
+    matching metric or verified query, it comes back under "semantic": use its SQL instead of writing your own.
     """
     if not isinstance(query, str) or not query.strip() or len(query) > 1000:
         raise GatewayError("INVALID_ARGUMENT", "Provide a short question or keywords to search for.")
@@ -192,17 +197,24 @@ async def search_database_metadata(query: str, limit: int = 5) -> str:
     catalog = await approved_metadata()
     views = [_visible_view(t, catalog.get((t["database"], t["name"]))) for t in tables]
     docs = [_describe(t, v) for t, v in zip(tables, views)]
+    # Approved semantic definitions, only when the caller's grants cover every table they read.
+    visible = {f"{t['database']}.{t['name']}" for t in tables}
+    definitions = [d for d in await semantic.approved() if set(d["tables"]) <= visible]
+    every = docs + [semantic.describe(d) for d in definitions]
     method, scores = "keyword", None
-    if EMBEDDINGS_URL and all(d in _cache for d in docs):
+    if EMBEDDINGS_URL and all(d in _cache for d in every):
         try:
             question = (await _embed([query], QUERY_EMBED_TIMEOUT))[0]
-            scores, method = [_cosine(question, _cache[d]) for d in docs], "semantic"
+            scores, method = [_cosine(question, _cache[d]) for d in every], "semantic"
         except (OSError, httpx.HTTPError, KeyError, ValueError):
             scores = None  # local embedding server down or slow
     elif EMBEDDINGS_URL:
-        _warm_later(docs)  # tables not embedded yet: rank by words now, semantically once the task finishes
+        _warm_later(every)  # not embedded yet: rank by words now, semantically once the task finishes
     if scores is None:
-        scores = _lexical(query, docs)
+        scores = _lexical(query, every)
+    scores, definition_scores = scores[: len(docs)], scores[len(docs) :]
+    matches = sorted(zip(definition_scores, range(len(definitions))), reverse=True)[:MAX_DEFINITIONS]
+    matched = [semantic.for_agent(definitions[i]) for score, i in matches if score >= DEFINITION_MIN_SCORE[method]]
     scores = [score * _weight(t) for score, t in zip(scores, tables)]
     ranked = sorted(zip(scores, tables, views), key=lambda item: item[0], reverse=True)[:limit]
     results = [
@@ -217,4 +229,5 @@ async def search_database_metadata(query: str, limit: int = 5) -> str:
         }
         for score, t, view in ranked
     ]
-    return json.dumps({"query": query, "method": method, "results": results}, ensure_ascii=False)
+    payload = {"query": query, "method": method, "results": results, **({"semantic": matched} if matched else {})}
+    return json.dumps(payload, ensure_ascii=False)

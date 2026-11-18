@@ -75,6 +75,10 @@ function installAdmin(router) {
   router.get("/kai-integrations/openmetadata/databases", handle(integrations.databases));
   router.get("/kai-integrations/:name", handle(integrations.get));
   router.put("/kai-integrations/:name", handle(integrations.save));
+  router.get("/kai-semantic", handle(integrations.semanticList));
+  router.post("/kai-semantic", handle(integrations.semanticCreate));
+  router.put("/kai-semantic/:id", handle(integrations.semanticUpdate));
+  router.delete("/kai-semantic/:id", handle(integrations.semanticDelete));
   router.get(
     "/:id/kai-warehouse-context",
     handle((req) => accounts.warehouseContext(req, false)),

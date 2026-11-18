@@ -352,6 +352,7 @@ def send_mail(settings, to, subject, text, timeout=15):
 # form field -> (env key, label, max); prices in USD per 1M tokens, rate in IDR per USD. Empty = not set.
 PRICING_FORM = {
     "input_usd_per_million": ("KAI_PRICE_INPUT_USD_PER_M", "Harga token masuk", 1000),
+    "cached_input_usd_per_million": ("KAI_PRICE_CACHED_INPUT_USD_PER_M", "Harga token masuk dari cache", 1000),
     "output_usd_per_million": ("KAI_PRICE_OUTPUT_USD_PER_M", "Harga token keluar", 1000),
     "usd_to_idr": ("KAI_USD_TO_IDR", "Kurs USD ke Rupiah", 1_000_000),
 }

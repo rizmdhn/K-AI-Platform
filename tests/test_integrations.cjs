@@ -55,3 +55,22 @@ test("smtp test needs manage:configs and forwards only the recipient; mail never
     assert.equal(result.configured, configured);
   }
 });
+
+test("semantic layer: session editor id, known fields only, write needs manage:configs, ids are UUIDs", async () => {
+  const { api, calls } = build();
+  const id = "0b6f1d2e-3c4a-4b5c-8d9e-0f1a2b3c4d5e";
+  const req = (body, params = {}) => ({ user: { id: ADMIN, role: "ADMIN" }, params, body });
+  await api.semanticCreate(req({ kind: "metric", name: "omzet", expression: "sum(x)", updated_by: "b".repeat(24), source: "catalog" }));
+  assert.match(calls[0].url, /internal\/semantic$/);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { kind: "metric", name: "omzet", expression: "sum(x)", updated_by: ADMIN });
+  await api.semanticUpdate(req({ status: "approved" }, { id }));
+  assert.equal(calls[1].url.endsWith(`/semantic/${id}`), true);
+  assert.equal(calls[1].init.method, "PUT");
+  await api.semanticDelete(req({}, { id }));
+  assert.equal(calls[2].init.method, "DELETE");
+  await assert.rejects(api.semanticUpdate(req({}, { id: "../integrations/smtp" })), { status: 404 });
+  const viewer = build(["access:admin", "read:configs"]);
+  await viewer.api.semanticList(req());
+  await assert.rejects(viewer.api.semanticCreate(req({ kind: "metric" })), { status: 403 });
+  await assert.rejects(viewer.api.semanticDelete(req({}, { id })), { status: 403 });
+});

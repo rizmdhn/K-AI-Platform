@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { AccessDenied, PermissionsUnavailable } from '@/components/shared';
 import { IntegrationsPanel } from '@/components/users/IntegrationsPanel';
+import { SemanticPanel } from '@/components/users/SemanticPanel';
 import { SettingsSection } from '@/components/users/SettingsSection';
 import { SmtpTest } from '@/components/users/SmtpTest';
 import { SystemCapabilities } from '@/constants';
@@ -14,6 +15,7 @@ function IntegrationsRoute() {
   return <div className="flex flex-col gap-4 p-4 md:p-6">
     <h1 className="text-xl font-medium">Integrasi</h1>
     <IntegrationsPanel />
+    <SemanticPanel />
     <SettingsSection name="batch_model" title="Model AI untuk tugas batch"
       description={<div className="flex flex-col gap-2">
         <p>Model ini mengerjakan tugas otomatis yang memproses banyak data sekaligus. Model ini tidak dipakai untuk chat: asisten chat memakai modelnya sendiri.</p>
@@ -52,6 +54,7 @@ function IntegrationsRoute() {
       description="Tarif per 1 juta token sesuai daftar harga penyedia model (contoh: Gemini pada Vertex AI). Nilai ini digunakan untuk estimasi biaya pada dashboard dan bukan merupakan tagihan resmi. Kosongkan apabila belum tersedia."
       fields={[
         { key: 'input_usd_per_million', label: 'Token masuk (US$ per 1 juta token)', type: 'text', placeholder: '0.30' },
+        { key: 'cached_input_usd_per_million', label: 'Token masuk dari cache (US$ per 1 juta token)', type: 'text', placeholder: '0.03', help: 'Opsional. Tarif bagian prompt yang dibaca dari cache penyedia model. Bila kosong, dihitung dengan tarif token masuk.' },
         { key: 'output_usd_per_million', label: 'Token keluar (US$ per 1 juta token)', type: 'text', placeholder: '2.50' },
         { key: 'usd_to_idr', label: 'Kurs (Rupiah per US$)', type: 'text', placeholder: '16500', help: 'Opsional. Diperlukan untuk menampilkan biaya dalam Rupiah.' },
       ]} />

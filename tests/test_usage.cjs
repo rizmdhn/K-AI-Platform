@@ -5,7 +5,7 @@ const { createUsage } = require("../services/platform-api/usage.cjs");
 
 const ADMIN = "a".repeat(24), U1 = "b".repeat(24), U2 = "c".repeat(24);
 const ROWS = [
-  { _id: { user: U1, model: "gemini", type: "prompt", day: "2026-11-01" }, tokens: 2_000_000, calls: 4 },
+  { _id: { user: U1, model: "gemini", type: "prompt", day: "2026-11-01" }, tokens: 2_000_000, cached: 1_000_000, calls: 4 },
   { _id: { user: U1, model: "gemini", type: "completion", day: "2026-11-01" }, tokens: 500_000, calls: 4 },
   { _id: { user: U2, model: "gemini", type: "prompt", day: "2026-11-02" }, tokens: 1_000_000, calls: 1 },
   { _id: { user: U2, model: "gemini", type: "completion", day: "2026-11-02" }, tokens: 100_000, calls: 1 },
@@ -44,8 +44,20 @@ test("totals per user, model and day; calls counted once per model call", async 
 test("cost uses saved USD prices per 1M tokens", async () => {
   const { api, req } = build({ prices: { input_usd_per_million: "0.3", output_usd_per_million: "2.5", usd_to_idr: "16000" } });
   const r = await api.summary(req("30"));
-  assert.ok(Math.abs(r.total.usd - (3 * 0.3 + 0.6 * 2.5)) < 1e-9);
+  assert.ok(Math.abs(r.total.usd - (3 * 0.3 + 0.6 * 2.5)) < 1e-9);  // no cached price: cached tokens at the input price
   assert.equal(r.pricing.usd_to_idr, 16000);
+});
+
+test("cached prompt tokens are billed at the cached price, per total, user and bucket", async () => {
+  const { api, seen, req } = build({ prices: { input_usd_per_million: "0.3", cached_input_usd_per_million: "0.03", output_usd_per_million: "2.5" } });
+  const r = await api.summary(req("30"));
+  assert.equal(r.total.cached, 1_000_000);
+  assert.ok(Math.abs(r.total.usd - (2 * 0.3 + 1 * 0.03 + 0.6 * 2.5)) < 1e-9);
+  assert.ok(Math.abs(r.users[0].usd - (1 * 0.3 + 1 * 0.03 + 0.5 * 2.5)) < 1e-9);
+  const day = r.daily.find((d) => d.day === "2026-11-01");
+  assert.ok(day.cached === 1_000_000 && Math.abs(day.usd - (1 * 0.3 + 1 * 0.03 + 0.5 * 2.5)) < 1e-9);
+  assert.equal(r.pricing.cached_input_usd_per_million, 0.03);
+  assert.deepEqual(seen.pipeline[1].$group.cached, { $sum: { $abs: { $ifNull: ["$readTokens", 0] } } });
 });
 
 test("24 hours are bucketed per hour, filling empty hours", async () => {

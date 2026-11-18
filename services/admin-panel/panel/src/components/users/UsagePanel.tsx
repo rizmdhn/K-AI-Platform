@@ -53,16 +53,12 @@ const SERIES = [
   { key: 'completion', label: 'Token keluar', fill: 'bg-[#eb6834] dark:bg-[#d95926]' },
 ] as const;
 type Bucket = UsageSummary['daily'][number];
-function bucketCost(d: Bucket, pricing: Pricing) {
-  if (!pricing.priced || pricing.input_usd_per_million == null || pricing.output_usd_per_million == null) return null;
-  return (d.prompt * pricing.input_usd_per_million + d.completion * pricing.output_usd_per_million) / 1e6;
-}
 function Tooltip({ d, hourly, pricing, index, count }: { d: Bucket; hourly: boolean; pricing: Pricing; index: number; count: number }) {
   const left = ((index + 0.5) / count) * 100;
   let shift = '-50%';
   if (left < 15) shift = '0%';
   else if (left > 85) shift = '-100%';
-  const value = bucketCost(d, pricing);
+  const value = d.usd;
   return <div role="tooltip" className="pointer-events-none absolute bottom-full z-10 mb-2 flex min-w-44 flex-col gap-1 rounded-md border border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) p-2.5 text-xs shadow-md"
     style={{ left: `${left}%`, transform: `translateX(${shift})` }}>
     <span className="text-(--cui-color-text-muted)">{bucketLabel(d.day, hourly, true)}</span>
@@ -71,6 +67,9 @@ function Tooltip({ d, hourly, pricing, index, count }: { d: Bucket; hourly: bool
       <span className="text-(--cui-color-text-muted)">{series.label}</span>
       <b className="ml-auto font-medium tabular-nums text-(--cui-color-text-default)">{whole.format(d[series.key])}</b>
     </span>)}
+    {d.cached > 0 && <span className="flex gap-2 pl-5">
+      <span className="text-(--cui-color-text-muted)">dari cache</span><b className="ml-auto font-medium tabular-nums">{whole.format(d.cached)}</b>
+    </span>}
     <span className="flex gap-2 border-t border-(--cui-color-stroke-default) pt-1">
       <span className="text-(--cui-color-text-muted)">Panggilan model</span><b className="ml-auto font-medium tabular-nums">{whole.format(d.calls)}</b>
     </span>
@@ -155,7 +154,7 @@ export function UsagePanel() {
     {query.isError && <Notice tone="error">Data pemakaian token gagal dimuat. Silakan coba kembali.</Notice>}
     {data && <div className={`flex flex-col gap-4 transition-opacity ${query.isPlaceholderData ? 'opacity-60' : ''}`}>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Token masuk (prompt)" value={compact.format(data.total.prompt)} change={delta(data.total.prompt, data.previous.prompt, periodText)} hint="Termasuk riwayat percakapan dan keluaran tool" />
+        <Stat label="Token masuk (prompt)" value={compact.format(data.total.prompt)} change={delta(data.total.prompt, data.previous.prompt, periodText)} hint={data.total.cached ? `${compact.format(data.total.cached)} dibaca dari cache (tarif lebih murah)` : 'Termasuk riwayat percakapan dan keluaran tool'} />
         <Stat label="Token keluar (jawaban)" value={compact.format(data.total.completion)} change={delta(data.total.completion, data.previous.completion, periodText)} />
         <Stat label="Panggilan model" value={whole.format(data.total.calls)} change={delta(data.total.calls, data.previous.calls, periodText)} hint={`${whole.format(data.user_count)} pengguna`} />
         <Stat label="Estimasi biaya" {...costStat(total, data.pricing)}

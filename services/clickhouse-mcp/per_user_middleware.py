@@ -41,6 +41,7 @@ from schema_tool import get_table_schema
 from metadata_search import search_database_metadata
 from row_search import search_rows_by_meaning
 from comment_sql import suggest_comment_sql
+from semantic import propose_semantic_definition, register_semantic_routes
 from batch_jobs import get_row_labeling_job, register_job_routes, start_row_labeling
 from sql_tool import execute_readonly_sql
 from sql_policy import UnsafeSQL, validate
@@ -296,11 +297,13 @@ def setup_middleware(mcp):
     register_readiness_routes(mcp)
     register_problem_routes(mcp)
     register_integration_routes(mcp)
+    register_semantic_routes(mcp)
     mcp.add_tool(Tool.from_function(get_table_schema))
     mcp.add_tool(Tool.from_function(execute_readonly_sql))
     mcp.add_tool(Tool.from_function(search_database_metadata))
     mcp.add_tool(Tool.from_function(search_rows_by_meaning))
     mcp.add_tool(Tool.from_function(suggest_comment_sql))
+    mcp.add_tool(Tool.from_function(propose_semantic_definition))
     mcp.add_tool(Tool.from_function(start_row_labeling))
     mcp.add_tool(Tool.from_function(get_row_labeling_job))
     register_job_routes(mcp)

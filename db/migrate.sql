@@ -78,4 +78,12 @@ SELECT NOT EXISTS (
     \ir migrations/011_pricing_settings.sql
     INSERT INTO kai.schema_migrations (version) VALUES ('011_pricing_settings');
 \endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM kai.schema_migrations WHERE version = '012_semantic_definitions'
+) AS apply_semantic_definitions \gset
+\if :apply_semantic_definitions
+    \ir migrations/012_semantic_definitions.sql
+    INSERT INTO kai.schema_migrations (version) VALUES ('012_semantic_definitions');
+\endif
 COMMIT;
