@@ -3,7 +3,7 @@ import { Badge, Button } from '@clickhouse/click-ui';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { localModelActionFn, localModelsFn } from '@/server/kaiAccounts';
 import type { LocalModel, LocalModelDownload, LocalModelState } from '@/server/kaiAccounts';
-import { Notice, errorText } from './AccountFields';
+import { Notice, errorText } from '../users/AccountFields';
 type Action = 'download' | 'pause' | 'activate' | 'delete';
 const SPARE = 1e9;
 const gb = (bytes: number) => `${(bytes / 1e9).toLocaleString('id-ID', { maximumFractionDigits: 1 })} GB`;

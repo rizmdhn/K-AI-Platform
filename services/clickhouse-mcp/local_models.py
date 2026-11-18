@@ -195,7 +195,7 @@ async def _run(entry, job):
     except httpx.HTTPError as error:
         job.update(status="failed", phase=None,
                    message=f"Unduhan terputus ({type(error).__name__}). Bagian yang sudah terunduh disimpan; klik Lanjutkan. "
-                           "Bila server tanpa akses internet, salin file .gguf ke volume kai_local-llm-models (folder gguf).")
+                           "Bila server tanpa akses internet, salin file .gguf ke folder data/local-llm/gguf di server.")
     except OSError as error:
         job.update(status="failed", phase=None, message=f"File model tidak bisa ditulis ({error.strerror}).")
 

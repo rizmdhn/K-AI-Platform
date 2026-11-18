@@ -18,6 +18,12 @@ const navItems: t.NavItem[] = [
     capability: SystemCapabilities.READ_CONFIGS,
   },
   {
+    labelKey: 'com_nav_semantic',
+    path: '/semantic',
+    icon: 'database',
+    capability: SystemCapabilities.READ_CONFIGS,
+  },
+  {
     labelKey: 'com_nav_integrations',
     path: '/integrations',
     icon: 'plug',

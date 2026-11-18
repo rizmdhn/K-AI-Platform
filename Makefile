@@ -53,7 +53,7 @@ embeddings-up: check
 	$(COMPOSE) --profile documents up -d --wait --wait-timeout 900 embeddings
 
 # Local CPU model server for semantic layer drafts. Models are downloaded, activated and deleted in the Admin Panel
-# (Integrasi → Semantic layer → Model AI lokal); this only starts the server, it downloads nothing.
+# (menu Semantic layer → tab Buat draf AI); this only starts the server, it downloads nothing.
 llm-up: check
 	$(COMPOSE) --profile local-llm up -d --wait --wait-timeout 300 local-llm
 

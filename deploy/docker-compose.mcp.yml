@@ -86,7 +86,8 @@ services:
     volumes:
       - audit-logs:/var/log/kai
       # Local model files (Admin Panel downloads them from Hugging Face, checksum-verified, then local-llm serves them).
-      - local-llm-models:/models
+      # A folder next to the repo, not a Docker volume: models are GBs and Docker's disk is often the full root disk.
+      - ${KAI_LOCAL_MODELS_PATH:-../data/local-llm}:/models
     networks:
       - tools_private
       - tool_egress
@@ -192,7 +193,7 @@ services:
       KAI_LOCAL_LLM_CONTEXT: ${KAI_LOCAL_LLM_CONTEXT:-8192}
     volumes:
       - ./local-llm/supervise.sh:/supervise.sh:ro
-      - local-llm-models:/models
+      - ${KAI_LOCAL_MODELS_PATH:-../data/local-llm}:/models
     networks:
       - embed_private
     healthcheck:
@@ -217,4 +218,3 @@ networks:
 
 volumes:
   audit-logs:
-  local-llm-models:

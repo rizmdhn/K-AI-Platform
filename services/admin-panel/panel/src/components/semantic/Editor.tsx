@@ -1,26 +1,22 @@
 import { useState } from 'react';
-import { Badge, Button } from '@clickhouse/click-ui';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCapabilities } from '@/hooks';
-import { SystemCapabilities } from '@/constants';
-import { createSemanticFn, deleteSemanticFn, semanticListFn, updateSemanticFn } from '@/server/kaiAccounts';
+import { Button } from '@clickhouse/click-ui';
+import { useQueryClient } from '@tanstack/react-query';
+import { createSemanticFn, deleteSemanticFn, updateSemanticFn } from '@/server/kaiAccounts';
 import type { SemanticDefinition, SemanticForm, SemanticStatus } from '@/server/kaiAccounts';
-import { Notice, Select, errorText, inputClass } from './AccountFields';
-import { LocalModels } from './LocalModels';
-import { SemanticDrafts } from './SemanticDrafts';
-const STATUS: Record<SemanticStatus, { label: string; state: 'neutral' | 'success' | 'danger' }> = {
+import { Notice, Select, errorText, inputClass } from '../users/AccountFields';
+export const STATUS: Record<SemanticStatus, { label: string; state: 'neutral' | 'success' | 'danger' }> = {
   draft: { label: 'Draf', state: 'neutral' }, approved: { label: 'Disetujui', state: 'success' }, rejected: { label: 'Ditolak', state: 'danger' },
 };
-const KIND = { metric: 'Metrik', verified_query: 'Verified query' };
+export const KIND = { metric: 'Metrik', verified_query: 'Verified query' };
 const SAVED: Record<SemanticStatus, string> = { approved: 'Disetujui. Agent memakainya dalam 1 menit.', rejected: 'Ditolak.', draft: 'Tersimpan sebagai draf.' };
-const SOURCE = { ai: 'Draf AI', manual: 'Manual', catalog: 'Katalog' };
+export const SOURCE = { ai: 'Draf AI', manual: 'Manual', catalog: 'Katalog' };
 const METRIC_TYPES = ['sum', 'count', 'count_distinct', 'average', 'min', 'max', 'ratio', 'other'];
 const EMPTY: SemanticForm = {
   kind: 'metric', name: '', status: 'draft', description: '', synonyms: [], table: '', expression: '', metric_type: 'sum',
   unit: '', time_column: '', dimensions: [], filter: '', question: '', sql: '',
 };
 const list = (text: string) => text.split(',').map(item => item.trim()).filter(Boolean);
-function toForm(row: SemanticDefinition): SemanticForm {
+export function toForm(row: SemanticDefinition): SemanticForm {
   const d = row.definition;
   return {
     ...EMPTY, kind: row.kind, name: row.name, status: row.status, table: row.tables[0] ?? '', description: d.description ?? '',
@@ -37,7 +33,7 @@ function Text({ label, value, onChange, disabled, area = false, help, placeholde
   </label>;
 }
 /** Review form for one definition (or a new one when row is null). Saving re-validates the SQL in the MCP. */
-function Editor({ row, canManage, onDone }: { row: SemanticDefinition | null; canManage: boolean; onDone: (message: string) => void }) {
+export function Editor({ row, canManage, onDone }: { row: SemanticDefinition | null; canManage: boolean; onDone: (message: string) => void }) {
   const client = useQueryClient();
   const [form, setForm] = useState<SemanticForm>(row ? toForm(row) : EMPTY);
   const [synonyms, setSynonyms] = useState(form.synonyms.join(', ')), [dimensions, setDimensions] = useState(form.dimensions.join(', '));
@@ -61,7 +57,7 @@ function Editor({ row, canManage, onDone }: { row: SemanticDefinition | null; ca
     return run(() => (row ? updateSemanticFn({ data: { id: row.definition_id, form: data } }) : createSemanticFn({ data })), SAVED[status]);
   };
   const metric = form.kind === 'metric';
-  return <form className="flex flex-col gap-3 border-t border-(--cui-color-stroke-default) pt-3" onSubmit={e => e.preventDefault()}>
+  return <form className="flex flex-col gap-3" onSubmit={e => e.preventDefault()}>
     <div className="flex flex-wrap gap-3">
       <label className="flex flex-col gap-1 text-sm">Jenis
         <Select value={form.kind} disabled={disabled || !!row} onChange={e => setForm({ ...form, kind: e.target.value as SemanticForm['kind'] })}>
@@ -101,48 +97,18 @@ function Editor({ row, canManage, onDone }: { row: SemanticDefinition | null; ca
     </div>}
   </form>;
 }
-export function SemanticPanel() {
-  const { hasCapability } = useCapabilities();
-  const canManage = hasCapability(SystemCapabilities.MANAGE_CONFIGS);
-  const query = useQuery({ queryKey: ['kaiSemantic'], queryFn: () => semanticListFn(), retry: false });
-  const [filter, setFilter] = useState<SemanticStatus>('draft');
-  const [open, setOpen] = useState<string | null>(null), [notice, setNotice] = useState('');
-  const rows = query.data?.definitions ?? [];
-  const counts = rows.reduce<Record<SemanticStatus, number>>((acc, r) => ({ ...acc, [r.status]: acc[r.status] + 1 }), { draft: 0, approved: 0, rejected: 0 });
-  const shown = rows.filter(r => r.status === filter);
-  const done = (message: string) => { setOpen(null); setNotice(message); };
-  const review = canManage ? 'Tinjau' : 'Lihat';
-  return <section aria-label="Semantic layer" className="flex flex-col gap-3 rounded-lg border border-(--cui-color-stroke-default) p-4">
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <h2 className="font-medium">Semantic layer {counts.draft > 0 && <Badge text={`${counts.draft} draf menunggu`} state="neutral" />}</h2>
-      {canManage && <Button type="secondary" label={open === 'new' ? 'Tutup' : 'Tambah definisi'} onClick={() => { setNotice(''); setOpen(open === 'new' ? null : 'new'); }} />}
-    </div>
-    <div className="flex flex-col gap-2 text-sm text-(--cui-color-text-muted)">
-      <p>Definisi resmi metrik (mis. &ldquo;pendapatan bersih = sum(pendapatan_rp)&rdquo;) dan verified query (pertanyaan umum beserta SQL yang sudah diperiksa). Bila pertanyaan pengguna cocok, K-AI Analis Data memakai definisi ini, jadi angkanya konsisten dan jawabannya lebih cepat.</p>
-      <p>Draf bisa dibuat AI lokal di bawah atau ditambahkan manual. Draf baru dipakai agent setelah disetujui di sini. Query tetap dijalankan dengan hak akses ClickHouse masing-masing pengguna, jadi definisi tidak membuka data di luar hak aksesnya.</p>
-    </div>
-    {query.isError && <Notice tone="error">Semantic layer tidak bisa dibaca.</Notice>}
-    {query.data && !query.data.storage_available && <Notice tone="warning">Penyimpanan belum disiapkan di server (jalankan make migrate).</Notice>}
-    {query.data?.storage_available && <LocalModels canManage={canManage} />}
-    {query.data?.storage_available && <SemanticDrafts canManage={canManage} />}
-    {notice && <Notice tone="success">{notice}</Notice>}
-    {open === 'new' && <Editor row={null} canManage={canManage} onDone={done} />}
-    <label className="flex items-center gap-2 text-sm"><span className="text-(--cui-color-text-muted)">Tampilkan</span>
-      <Select value={filter} onChange={e => { setFilter(e.target.value as SemanticStatus); setOpen(null); }}>
-        {(Object.keys(STATUS) as SemanticStatus[]).map(s => <option key={s} value={s}>{STATUS[s].label} ({counts[s]})</option>)}
-      </Select>
-    </label>
-    {query.isSuccess && !shown.length && <p className="text-sm text-(--cui-color-text-muted)">Belum ada definisi dengan status ini.</p>}
-    <ul className="flex flex-col gap-2">{shown.map(row => <li key={row.definition_id} className="rounded-md border border-(--cui-color-stroke-default) p-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-col gap-1">
-          <span className="flex flex-wrap items-center gap-2 font-medium">{row.name}<Badge text={KIND[row.kind]} state="neutral" /><Badge text={STATUS[row.status].label} state={STATUS[row.status].state} /></span>
-          <span className="text-sm wrap-break-word">{row.definition.question || row.definition.description || row.definition.expression}</span>
-          <span className="text-xs break-all text-(--cui-color-text-muted)">{row.tables.join(', ')} · {SOURCE[row.source]}</span>
-        </div>
-        <Button type="secondary" label={open === row.definition_id ? 'Tutup' : review} onClick={() => { setNotice(''); setOpen(open === row.definition_id ? null : row.definition_id); }} />
-      </div>
-      {open === row.definition_id && <Editor row={row} canManage={canManage} onDone={done} />}
-    </li>)}</ul>
-  </section>;
+/** "kai_demo.penjualan" -> "kai_demo". */
+export const databaseOf = (table: string) => table.split('.', 1)[0];
+/** Approve or reject several definitions, one request each (the MCP re-validates every one). */
+export async function setStatus(rows: SemanticDefinition[], status: SemanticStatus, onStep: (done: number) => void) {
+  const failed: string[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    try {
+      await updateSemanticFn({ data: { id: rows[i].definition_id, form: { ...toForm(rows[i]), status } } });
+    } catch (cause) {
+      failed.push(`${rows[i].name}: ${errorText(cause, 'gagal')}`);
+    }
+    onStep(i + 1);
+  }
+  return failed;
 }

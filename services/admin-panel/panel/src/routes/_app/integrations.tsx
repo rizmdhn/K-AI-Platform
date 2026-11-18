@@ -1,7 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { AccessDenied, PermissionsUnavailable } from '@/components/shared';
 import { IntegrationsPanel } from '@/components/users/IntegrationsPanel';
-import { SemanticPanel } from '@/components/users/SemanticPanel';
 import { SettingsSection } from '@/components/users/SettingsSection';
 import { SmtpTest } from '@/components/users/SmtpTest';
 import { SystemCapabilities } from '@/constants';
@@ -15,7 +14,6 @@ function IntegrationsRoute() {
   return <div className="flex flex-col gap-4 p-4 md:p-6">
     <h1 className="text-xl font-medium">Integrasi</h1>
     <IntegrationsPanel />
-    <SemanticPanel />
     <SettingsSection name="batch_model" title="Model AI untuk tugas batch"
       description={<div className="flex flex-col gap-2">
         <p>Model ini mengerjakan tugas otomatis yang memproses banyak data sekaligus. Model ini tidak dipakai untuk chat: asisten chat memakai modelnya sendiri.</p>

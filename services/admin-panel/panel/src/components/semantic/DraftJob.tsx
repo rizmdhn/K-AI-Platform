@@ -3,7 +3,7 @@ import { Badge, Button } from '@clickhouse/click-ui';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { semanticDatabasesFn, semanticDraftsFn, startSemanticDraftsFn, stopSemanticDraftsFn } from '@/server/kaiAccounts';
 import type { DraftModelStatus, SemanticJob } from '@/server/kaiAccounts';
-import { Notice, Select, errorText } from './AccountFields';
+import { Notice, Select, errorText } from '../users/AccountFields';
 const MODEL: Record<DraftModelStatus, { label: string; state: 'success' | 'neutral' | 'danger' }> = {
   ready: { label: 'Model lokal siap', state: 'success' }, no_model: { label: 'Belum ada model aktif', state: 'neutral' },
   loading: { label: 'Server model memperbarui daftar', state: 'neutral' }, failed: { label: 'Model aktif gagal dimuat', state: 'danger' },
@@ -26,8 +26,8 @@ function Count({ label, value, hint }: { label: string; value: number; hint?: st
 }
 function Outcome({ job }: { job: SemanticJob }) {
   if (job.status === 'failed') return <Notice tone="error">{job.message ?? 'Job gagal.'} Draf yang sudah tersimpan tetap ada.</Notice>;
-  if (job.status === 'cancelled') return <Notice tone="info">Dihentikan setelah {whole.format(job.tables_done)} tabel. {whole.format(job.drafts_saved)} draf tersimpan dan bisa ditinjau di bawah.</Notice>;
-  if (job.status === 'done') return <Notice tone="success">Selesai: {whole.format(job.drafts_saved)} draf tersimpan dari {whole.format(job.tables_done)} tabel di {job.database}. Tinjau di daftar Draf di bawah; draf baru dipakai agent setelah disetujui.</Notice>;
+  if (job.status === 'cancelled') return <Notice tone="info">Dihentikan setelah {whole.format(job.tables_done)} tabel. {whole.format(job.drafts_saved)} draf tersimpan dan bisa ditinjau di tab Tinjau draf.</Notice>;
+  if (job.status === 'done') return <Notice tone="success">Selesai: {whole.format(job.drafts_saved)} draf tersimpan dari {whole.format(job.tables_done)} tabel di {job.database}. Tinjau di tab Tinjau draf; draf baru dipakai agent setelah disetujui.</Notice>;
   return null;
 }
 function Progress({ job, canManage, onStop, stopping }: { job: SemanticJob; canManage: boolean; onStop: () => void; stopping: boolean }) {
@@ -55,7 +55,7 @@ function Issues({ job }: { job: SemanticJob }) {
   </details>;
 }
 /** Start and follow the local-model draft job; drafts appear in the review list while it runs. */
-export function SemanticDrafts({ canManage }: { canManage: boolean }) {
+export function DraftJob({ canManage, onReview }: { canManage: boolean; onReview: () => void }) {
   const client = useQueryClient();
   const state = useQuery({ queryKey: ['kaiSemanticDrafts'], queryFn: () => semanticDraftsFn(), retry: false,
     refetchInterval: query => (query.state.data?.job?.status === 'running' ? 5000 : false) });
@@ -84,9 +84,10 @@ export function SemanticDrafts({ canManage }: { canManage: boolean }) {
     </div>
     <p className="text-sm text-(--cui-color-text-muted)">Model AI lokal di server membaca nama, tipe, dan komentar kolom pada database yang Anda pilih, memakai akses ClickHouse akun Anda sendiri. Isi data tidak dibaca dan tidak ada yang dikirim ke luar server. Setiap draf diperiksa ke ClickHouse sebelum disimpan, dan tabel yang sudah punya definisi dilewati. Proses berjalan di latar belakang; halaman ini boleh ditutup.</p>
     {state.isError && <Notice tone="error">Status pembuatan draf tidak bisa dibaca.</Notice>}
-    {model && model.status !== 'ready' && !running && <Notice tone="info">{model.status === 'no_model' ? 'Unduh lalu aktifkan model di bagian Model AI lokal di atas sebelum membuat draf.' : MODEL[model.status].label + '. Lihat bagian Model AI lokal di atas.'}</Notice>}
+    {model && model.status !== 'ready' && !running && <Notice tone="info">{model.status === 'no_model' ? 'Unduh lalu aktifkan model di bagian Model AI lokal sebelum membuat draf.' : MODEL[model.status].label + '. Lihat bagian Model AI lokal.'}</Notice>}
     {job && running && <Progress job={job} canManage={canManage} stopping={busy} onStop={() => void act(() => stopSemanticDraftsFn())} />}
     {job && !running && <Outcome job={job} />}
+    {job && job.drafts_saved > 0 && <Button type="secondary" label={`Tinjau ${whole.format(job.drafts_saved)} draf`} onClick={onReview} />}
     {job && <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
       <Count label="Draf tersimpan" value={job.drafts_saved} />
       <Count label="Draf dilewati" value={job.drafts_skipped} hint="Tidak lolos pemeriksaan" />

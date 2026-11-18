@@ -120,8 +120,9 @@ class MCPComposeTests(unittest.TestCase):
         self.assertEqual(set(llm["networks"]), {"embed_private"})  # downloads go through the MCP, never this container
         self.assertEqual(llm["profiles"], ["local-llm"])
         self.assertFalse(llm.get("ports"))
+        # A bind folder next to the repo (not Docker's disk), shared by these two services only.
         holders = {name for name, service in config["services"].items()
-                   if any(v.get("source") == "local-llm-models" for v in service.get("volumes", []))}
+                   for v in service.get("volumes", []) if str(v.get("source", "")).endswith("/data/local-llm")}
         self.assertEqual(holders, {"clickhouse-mcp", "local-llm"})
 
     def test_private_service_has_only_api_network_and_egress(self):

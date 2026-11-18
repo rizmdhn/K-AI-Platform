@@ -11,6 +11,7 @@ deploy/runtime/
 runtime/
 secrets/
 backups/
+data/
 *.pem
 *.key
 id_rsa
