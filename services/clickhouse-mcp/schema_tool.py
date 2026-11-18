@@ -39,6 +39,8 @@ async def get_table_schema(database: str, table: str) -> str:
         "database": database,
         "table": table,
         "engine": item["engine"],
+        # Filtering on the leading sorting-key columns lets ClickHouse skip most of the table.
+        "sorting_key": item.get("sorting_key") or None,
         "columns": [
             {
                 "name": column["name"],

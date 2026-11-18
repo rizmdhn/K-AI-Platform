@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+from collections import OrderedDict
 
 import httpx2 as httpx
 from starlette.background import BackgroundTask
@@ -32,11 +33,64 @@ log = logging.getLogger("uvicorn.error")
 SKIP_SIGNATURE = "skip_thought_signature_validator"
 
 
+# Real thought signatures from Vertex replies, by tool call id. LibreChat drops them from the history it sends back.
+# ponytail: in-memory per proxy process (lost on restart, then the documented placeholder is used); a shared store if
+# the proxy ever runs as several replicas.
+MAX_SIGNATURES = 10_000
+_signatures = OrderedDict()
+
+
+def remember(call):
+    """Store the signature Vertex attached to a tool call (only the first call of a step carries one)."""
+    if not isinstance(call, dict) or not isinstance(call.get("id"), str):
+        return
+    google = (call.get("extra_content") or {}).get("google") if isinstance(call.get("extra_content"), dict) else None
+    signature = google.get("thought_signature") if isinstance(google, dict) else None
+    if isinstance(signature, str) and signature:
+        _signatures[call["id"]] = signature
+        _signatures.move_to_end(call["id"])
+        while len(_signatures) > MAX_SIGNATURES:
+            _signatures.popitem(last=False)
+
+
+class SignatureTap:
+    """Reads tool-call signatures out of the reply while it is passed through unchanged."""
+
+    def __init__(self):
+        self.buffer = b""
+
+    def feed(self, chunk):
+        self.buffer += chunk
+        *lines, self.buffer = self.buffer.split(b"\n")
+        for line in lines:
+            self._line(line.strip())
+        if len(self.buffer) > MAX_BODY:  # a reply without newlines (non-streaming) is parsed at close
+            self.buffer = b""
+
+    def close(self):
+        self._line(self.buffer.strip())
+        self.buffer = b""
+
+    def _line(self, line):
+        if line.startswith(b"data:"):
+            line = line[5:].strip()
+        if not line.startswith(b"{"):
+            return
+        try:
+            data = json.loads(line)
+        except ValueError:
+            return
+        for choice in data.get("choices") or [] if isinstance(data, dict) else []:
+            part = (choice.get("delta") or choice.get("message") or {}) if isinstance(choice, dict) else {}
+            for call in part.get("tool_calls") or [] if isinstance(part, dict) else []:
+                remember(call)
+
+
 def keep_tool_turns_valid(messages):
     """Gemini 3 rejects (HTTP 400) a turn whose earlier tool call lost its thought signature; LibreChat drops it.
 
-    ponytail: the placeholder skips signature validation, which can cost some reasoning quality on multi-step tool
-    use. Upgrade path: cache the real signatures from the streamed reply (tool_call id -> signature) and re-inject them.
+    The real signature remembered from the reply is put back; the documented placeholder (which skips validation and
+    can cost reasoning quality on multi-step tool use) is only used when it is unknown, e.g. after a proxy restart.
     """
     for message in messages if isinstance(messages, list) else []:
         calls = message.get("tool_calls") if isinstance(message, dict) and message.get("role") == "assistant" else None
@@ -45,7 +99,7 @@ def keep_tool_turns_valid(messages):
         extra = calls[0].setdefault("extra_content", {})  # only the first call of a step carries the signature
         google = extra.setdefault("google", {}) if isinstance(extra, dict) else None
         if isinstance(google, dict):
-            google.setdefault("thought_signature", SKIP_SIGNATURE)
+            google.setdefault("thought_signature", _signatures.get(calls[0].get("id"), SKIP_SIGNATURE))
 
 
 def target(env=os.environ):
@@ -108,7 +162,14 @@ async def chat_completions(request):
         return Response(detail, status_code=upstream.status_code,
                         media_type=upstream.headers.get("content-type", "application/json"))
 
-    return StreamingResponse(upstream.aiter_bytes(), status_code=upstream.status_code,
+    async def passthrough():
+        tap = SignatureTap()
+        async for chunk in upstream.aiter_bytes():
+            tap.feed(chunk)
+            yield chunk
+        tap.close()
+
+    return StreamingResponse(passthrough(), status_code=upstream.status_code,
                              media_type=upstream.headers.get("content-type", "application/json"),
                              background=BackgroundTask(close))
 

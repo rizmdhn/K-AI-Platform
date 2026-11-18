@@ -44,10 +44,11 @@ export function UsersPage() {
   const [roleFilter, setRoleFilter] = useState<t.RoleFilter>('all');
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TUser | null>(null);
-  const [detailUser, setDetailUser] = useState<TUser | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const { message: announcement, announce } = useAnnouncement();
 
   const { data: users = [], isLoading } = useQuery(usersQueryOptions);
+  const detailUser = users.find(user => user.id === detailId) ?? null;
   const { data: roleAssignments = {} } = useQuery(roleAssignmentsQueryOptions);
   const { data: groupAssignments = {} } = useQuery(groupAssignmentsQueryOptions);
   const { data: allScopes = [] } = useQuery(availableScopesOptions);
@@ -184,7 +185,7 @@ export function UsersPage() {
                   groups={groupAssignments[user.id] ?? []}
                   hasUserProfile={userProfileSet.has(user.id)}
                   isLast={i === filtered.length - 1}
-                  onViewDetails={() => setDetailUser(user)}
+                  onViewDetails={() => setDetailId(user.id)}
                   onDelete={() => setDeleteTarget(user)}
                   canManage={false}
                 />
@@ -210,7 +211,7 @@ export function UsersPage() {
 
       <UserDetailDialog
         user={detailUser}
-        onClose={() => setDetailUser(null)}
+        onClose={() => setDetailId(null)}
         canManageRoles={canManageRoles}
         canManageGroups={canManageGroups}
         canAssignConfigs={canAssignConfigs}

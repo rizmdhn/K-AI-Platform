@@ -17,6 +17,12 @@ class BootstrapTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 select({"KAI_DOMAIN": bad})
 
+    def test_rag_url_filled_only_when_empty(self):
+        updates = self.bootstrap.rag_updates
+        self.assertEqual(updates({}), {'KAI_RAG_API_URL': 'http://rag_api:8000'})
+        self.assertEqual(updates({'KAI_RAG_API_URL': ''}), {'KAI_RAG_API_URL': 'http://rag_api:8000'})
+        self.assertEqual(updates({'KAI_RAG_API_URL': 'http://rag.internal:8000'}), {})
+
     def test_vertex_overlay_only_with_an_absolute_service_account_path(self):
         select = self.bootstrap.vertex_overlay
         self.assertEqual(select({}), "")

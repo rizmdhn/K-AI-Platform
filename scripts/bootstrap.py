@@ -231,6 +231,14 @@ def update_configuration(runtime, transform):
         return True
 
 
+RAG_URL = 'http://rag_api:8000'
+
+
+def rag_updates(fields):
+    """Point the api at the local RAG stack once it runs; an operator-set URL is kept."""
+    return {} if value(fields.get('KAI_RAG_API_URL', '')) else {'KAI_RAG_API_URL': RAG_URL}
+
+
 def _initialize(runtime: Path) -> bool:
     environment = runtime / ".env"
     migrated = False
@@ -347,12 +355,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mcp-overlay', action='store_true')
     parser.add_argument('--tls-overlay', action='store_true')
+    parser.add_argument('--enable-rag', action='store_true', help='set KAI_RAG_API_URL to the local rag_api when empty')
     args = parser.parse_args()
     destination = Path(__file__).resolve().parents[1]
     try:
         if args.tls_overlay:
             fields = settings((destination / '.env').read_text()) if (destination / '.env').exists() else {}
             print(tls_overlay(fields))
+        elif args.enable_rag:
+            changed = update_configuration(destination, rag_updates)
+            print('KAI_RAG_API_URL set to the local rag_api.' if changed else 'KAI_RAG_API_URL already set; kept.')
         elif args.mcp_overlay:
             fields = settings((destination / '.env').read_text()) if (destination / '.env').exists() else {}
             print((mcp_overlays(fields) + vertex_overlay(fields)).strip())

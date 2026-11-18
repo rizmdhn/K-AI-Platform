@@ -12,7 +12,7 @@ import schema_tool as schema
 def table_record(name="orders", database="sales"):
     return {"database": database, "name": name, "engine": "MergeTree",
             "create_table_query": "PRIVATE_DDL", "engine_full": "PRIVATE_ENGINE_CONFIG",
-            "total_rows": 12345, "columns": [
+            "sorting_key": "region", "total_rows": 12345, "columns": [
                 {"name": "region", "column_type": "String", "comment": "Region"},
                 {"name": "amount", "column_type": "UInt32", "comment": ""}]}
 
@@ -23,7 +23,7 @@ class SchemaToolTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(schema, "list_tables_async", mock.AsyncMock(
                 return_value=json.dumps({"tables": [table_record()]}))):
             text = await schema.get_table_schema("sales", "orders")
-        self.assertEqual(json.loads(text), {"database": "sales", "table": "orders", "engine": "MergeTree",
+        self.assertEqual(json.loads(text), {"database": "sales", "table": "orders", "engine": "MergeTree", "sorting_key": "region",
                          "columns": [{"name": "region", "type": "String", "comment": "Region"},
                                      {"name": "amount", "type": "UInt32", "comment": ""}]})
         self.assertNotIn("PRIVATE", text)

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import unittest
+from array import array
 from unittest import mock
 
 import metadata_search
@@ -20,8 +21,8 @@ TABLES = {
 async def fake_run_query(sql):
     visible = [t for db, ts in TABLES.items() if db != "system" for t in ts]  # the SQL filters system databases
     if "system.tables" in sql:
-        return json.dumps({"columns": ["database", "name", "comment", "total_rows"],
-                           "rows": [[t["database"], t["name"], t["comment"], t.get("total_rows", 10)] for t in visible]})
+        return json.dumps({"columns": ["database", "name", "comment", "total_rows", "sorting_key"],
+                           "rows": [[t["database"], t["name"], t["comment"], t.get("total_rows", 10), "region"] for t in visible]})
     return json.dumps({"columns": ["database", "table", "name", "type", "comment"],
                        "rows": [[t["database"], t["name"], c["name"], c["column_type"], ""] for t in visible for c in t["columns"]]})
 
@@ -38,6 +39,29 @@ class MetadataSearchTests(unittest.TestCase):
         self.assertEqual(result["method"], "keyword")
         self.assertEqual(result["results"][0]["table"], "penjualan")
         self.assertNotIn("system", {r["database"] for r in result["results"]})
+
+    def test_uncached_tables_rank_by_words_then_semantically_once_warmed(self):
+        def vector(text):
+            return array("f", [1.0, 0.0] if "penjualan" in text.lower() or "omzet" in text.lower() else [0.0, 1.0])
+        async def fake_embed(texts, timeout):
+            await asyncio.sleep(0)
+            for t in texts:
+                metadata_search._cache[t] = vector(t)
+            return [metadata_search._cache[t] for t in texts]
+        async def scenario():
+            first = json.loads(await metadata_search.search_database_metadata("omzet"))
+            await metadata_search._warming  # background embedding of the catalog finishes
+            second = json.loads(await metadata_search.search_database_metadata("omzet"))
+            return first, second
+        metadata_search._cache.clear()
+        with mock.patch.object(metadata_search, "EMBEDDINGS_URL", "http://embeddings"), \
+             mock.patch.object(metadata_search, "_embed", fake_embed), \
+             mock.patch.object(metadata_search, "run_query_async", fake_run_query):
+            first, second = asyncio.run(scenario())
+        metadata_search._cache.clear()
+        self.assertEqual(first["method"], "keyword")  # no wait for embeddings on the request path
+        self.assertEqual((second["method"], second["results"][0]["table"]), ("semantic", "penjualan"))
+        self.assertEqual(second["results"][0]["sorting_key"], "region")
 
     def test_embedding_outage_falls_back_instead_of_failing(self):
         with mock.patch.object(metadata_search, "EMBEDDINGS_URL", "http://127.0.0.1:9/v1/embeddings"):

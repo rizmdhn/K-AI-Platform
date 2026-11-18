@@ -52,9 +52,11 @@ backup:
 embeddings-up: check
 	$(COMPOSE) --profile documents up -d --wait --wait-timeout 900 embeddings
 
-# Local RAG stack: embeddings + pgvector + rag_api. Set KAI_RAG_API_URL=http://rag_api:8000 in .env so api uses it.
+# Local RAG stack: embeddings + pgvector + rag_api, then point api at it (KAI_RAG_API_URL, kept if already set).
 documents-up: embeddings-up
 	$(COMPOSE) --profile documents up -d --wait --wait-timeout 300 vectordb rag_api
+	python3 scripts/bootstrap.py --enable-rag
+	$(COMPOSE) up -d --wait --wait-timeout 180 --no-deps api
 
 managed-chat:
 	$(COMPOSE) exec -T api node config/kai-managed-chat.cjs

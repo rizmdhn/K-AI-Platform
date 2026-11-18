@@ -121,5 +121,42 @@ class ThoughtSignatureTests(unittest.TestCase):
         self.assertNotIn("extra_content", messages[0])
 
 
+    def test_real_signature_from_a_streamed_reply_is_put_back_on_the_next_turn(self):
+        vertex_proxy._signatures.clear()
+        call = {"index": 0, "id": "call_1", "type": "function", "function": {"name": "run_query", "arguments": "{}"},
+                "extra_content": {"google": {"thought_signature": "sig-from-vertex"}}}
+        stream = ("data: " + json.dumps({"choices": [{"delta": {"tool_calls": [call]}}]}) + "\n\ndata: [DONE]\n\n").encode()
+
+        def split_reply(upstream):
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=stream)
+
+        with mock.patch.dict(os.environ, ENV):
+            _, body, _ = run(Request({"model": "gemini-3.5-flash", "stream": True, "messages": []}), split_reply)
+            self.assertEqual(body, stream)  # passed through unchanged
+            follow_up = {"model": "gemini-3.5-flash", "messages": [
+                {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function",
+                                                                      "function": {"name": "run_query", "arguments": "{}"}}]},
+                {"role": "assistant", "content": None, "tool_calls": [{"id": "unknown", "type": "function",
+                                                                      "function": {"name": "run_query", "arguments": "{}"}}]}]}
+            _, _, seen = run(Request(follow_up))
+        calls = [m["tool_calls"][0]["extra_content"]["google"]["thought_signature"] for m in seen["body"]["messages"]]
+        self.assertEqual(calls, ["sig-from-vertex", vertex_proxy.SKIP_SIGNATURE])
+
+    def test_tap_handles_a_chunk_boundary_inside_a_line(self):
+        vertex_proxy._signatures.clear()
+        call = {"id": "call_2", "extra_content": {"google": {"thought_signature": "split-sig"}}}
+        stream = ("data: " + json.dumps({"choices": [{"delta": {"tool_calls": [call]}}]}) + "\n\n").encode()
+        tap = vertex_proxy.SignatureTap()
+        tap.feed(stream[:25]); tap.feed(stream[25:]); tap.close()
+        self.assertEqual(vertex_proxy._signatures["call_2"], "split-sig")
+
+    def test_signature_cache_is_bounded(self):
+        vertex_proxy._signatures.clear()
+        with mock.patch.object(vertex_proxy, "MAX_SIGNATURES", 2):
+            for n in range(3):
+                vertex_proxy.remember({"id": f"c{n}", "extra_content": {"google": {"thought_signature": "s"}}})
+        self.assertEqual(list(vertex_proxy._signatures), ["c1", "c2"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,7 @@
-"""Client-safe tool errors; raw backend exception text never crosses this boundary."""
+"""Client-safe tool errors; raw backend exception text never crosses this boundary.
+
+Messages are in Indonesian because agents may show them verbatim; logic keys on `code`, never on the text.
+"""
 
 from fastmcp.exceptions import ToolError, ValidationError
 
@@ -13,18 +16,18 @@ def error_payload(error, request_id):
     if isinstance(error, GatewayError):
         code, message = error.code, str(error)
     elif isinstance(error, ValidationError):
-        code, message = "INVALID_ARGUMENT", "The tool arguments are invalid."
+        code, message = "INVALID_ARGUMENT", "Argumen tool tidak valid."
     else:
         text = str(error).upper()
         if "ACCESS_DENIED" in text:
             code, message = (
                 "ACCESS_DENIED",
-                "Your ClickHouse role does not allow this data. Ask your administrator if you need access.",
+                "Hak akses ClickHouse Anda tidak mencakup data ini. Hubungi administrator bila Anda memerlukan akses.",
             )
         elif "AUTHENTICATION_FAILED" in text:
             code, message = (
                 "AUTH_REQUIRED",
-                "ClickHouse rejected the saved username or password.",
+                "ClickHouse menolak username atau password yang tersimpan. Hubungi administrator untuk memperbaruinya.",
             )
         elif any(
             reason in text
@@ -39,8 +42,8 @@ def error_payload(error, request_id):
         ):
             code, message = (
                 "QUERY_LIMIT",
-                "The query hit a database limit (too many rows, too much memory or too slow). "
-                "Narrow it with filters, a shorter date range or aggregation.",
+                "Query melewati batas database (terlalu banyak baris, memori, atau waktu). "
+                "Persempit dengan filter, rentang tanggal yang lebih pendek, atau agregasi.",
             )
         elif any(
             reason in text
@@ -54,13 +57,13 @@ def error_payload(error, request_id):
         ):
             code, message = (
                 "INVALID_ARGUMENT",
-                "ClickHouse rejected the query. Check the table and column names.",
+                "ClickHouse menolak query. Periksa nama tabel dan kolom.",
             )
         else:
             code, message = (
                 "DEPENDENCY_UNAVAILABLE",
-                "The data warehouse is unavailable right now. Try again in a few minutes; "
-                "if it continues, contact your administrator.",
+                "Data warehouse sedang tidak dapat diakses. Coba lagi beberapa menit lagi; "
+                "bila berlanjut, hubungi administrator.",
             )
     return {"code": code, "message": message, "request_id": request_id}
 
