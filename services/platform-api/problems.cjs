@@ -1,6 +1,7 @@
 // P6-10: accounts and system issues for the admin "Perlu perhatian" panel. Read-only; returns codes, never secrets.
 // Signals: Mongo account state + CH agent ACL (here) and the MCP's sanitized 24 h audit summary (problems.py).
-const DENIALS = 5, MIN_CALLS = 20, ERROR_RATE = 0.2;
+// DENIALS: ClickHouse refused (grant question). BLOCKED: kAI SQL checker refused; agents usually self-correct, so a higher bar.
+const DENIALS = 5, BLOCKED = 10, MIN_CALLS = 20, ERROR_RATE = 0.2;
 const MCP_URL = "http://clickhouse-mcp:8000/v1/internal/problems";
 
 function createProblems({ accounts, managedAgent, aclEntries, VIEW, USER, fetchImpl = fetch, now = () => new Date() }) {
@@ -53,6 +54,7 @@ function createProblems({ accounts, managedAgent, aclEntries, VIEW, USER, fetchI
       if (last?.outcome === "login_rejected" && !(usage.last_ok > last.at) && !(verified[user.id] > last.at))
         issues.push({ code: "ch_login_rejected", at: last.at });
       if (usage?.denied >= DENIALS) issues.push({ code: "many_denials", count: usage.denied });
+      if (usage?.blocked >= BLOCKED) issues.push({ code: "many_blocked", count: usage.blocked });
       if (issues.length) flagged.push({ id: user.id, name: user.name, email: user.email, issues });
     }
     return { generated_at: now().toISOString(), calls_24h: mcp?.calls_24h ?? null, errors_24h: mcp?.errors_24h ?? null, system, accounts: flagged };

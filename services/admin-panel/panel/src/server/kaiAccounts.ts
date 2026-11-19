@@ -89,6 +89,26 @@ const usageDays = z.union([z.literal(1), z.literal(7), z.literal(30), z.literal(
 export const usageFn = createServerFn({ method: 'GET' }).inputValidator(z.object({ days: usageDays }).strict())
   .handler(async ({ data }): Promise<UsageSummary> => call(`/api/admin/users/kai-usage?days=${data.days}`, SystemCapabilities.READ_USERS));
 
+// Data access log from the MCP audit: who called which data tool and the outcome. Never SQL text or result values.
+export type AuditOutcome = 'ok' | 'cancelled' | 'error' | 'auth_failed' | 'login_rejected' | 'access_denied' | 'unsafe_sql' | 'query_limit' | 'no_credentials';
+export type AuditDays = 1 | 7 | 30 | 90;
+export interface AuditRow {
+  ts: string; user: string; name: string | null; email: string | null; request_id: string | null; tool: string | null; ch_user: string | null;
+  database: string | null; outcome: AuditOutcome; error_code: string | null; rows: number | null; truncated: boolean | null; duration_ms: number | null;
+}
+export interface AuditLog {
+  days: AuditDays; available: boolean; partial: boolean; total: number; counts: Partial<Record<AuditOutcome, number>>; tools: string[];
+  users: { id: string; name: string | null; email: string | null }[]; rows: AuditRow[];
+}
+export interface AuditFilter { days: AuditDays; user?: string; outcome?: AuditOutcome; tool?: string }
+const auditOutcome = z.enum(['ok', 'cancelled', 'error', 'auth_failed', 'login_rejected', 'access_denied', 'unsafe_sql', 'query_limit', 'no_credentials']);
+export const auditLogFn = createServerFn({ method: 'GET' })
+  .inputValidator(z.object({ days: usageDays, user: id.optional(), outcome: auditOutcome.optional(), tool: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/).optional() }).strict())
+  .handler(async ({ data }): Promise<AuditLog> => {
+    const query = new URLSearchParams(Object.entries(data).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]));
+    return call(`/api/admin/users/kai-audit?${query}`, SystemCapabilities.READ_USERS);
+  });
+
 // Integration settings (OpenMetadata + metadata draft worker). The token is write-only: never returned.
 export interface OpenMetadataSettings {
   url: string; service: string; ca_cert: string; catalog_enabled: boolean; databases: string[]; scan_hours: number; max_tables: number;

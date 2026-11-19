@@ -14,6 +14,7 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppUsersRouteImport } from './routes/_app/users'
 import { Route as AppSemanticRouteImport } from './routes/_app/semantic'
+import { Route as AppAuditRouteImport } from './routes/_app/audit'
 import { Route as AppIntegrationsRouteImport } from './routes/_app/integrations'
 import { Route as AppHelpRouteImport } from './routes/_app/help'
 import { Route as AppGrantsRouteImport } from './routes/_app/grants'
@@ -43,6 +44,11 @@ const AppUsersRoute = AppUsersRouteImport.update({
 const AppSemanticRoute = AppSemanticRouteImport.update({
   id: '/semantic',
   path: '/semantic',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAuditRoute = AppAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
   getParentRoute: () => AppRoute,
 } as any)
 const AppIntegrationsRoute = AppIntegrationsRouteImport.update({
@@ -85,6 +91,7 @@ export interface FileRoutesByFullPath {
   '/users': typeof AppUsersRoute
   '/integrations': typeof AppIntegrationsRoute
   '/semantic': typeof AppSemanticRoute
+  '/audit': typeof AppAuditRoute
   '/auth/openid/callback': typeof AuthOpenidCallbackRoute
   '/configuration/': typeof AppConfigurationIndexRoute
 }
@@ -96,6 +103,7 @@ export interface FileRoutesByTo {
   '/users': typeof AppUsersRoute
   '/integrations': typeof AppIntegrationsRoute
   '/semantic': typeof AppSemanticRoute
+  '/audit': typeof AppAuditRoute
   '/': typeof AppIndexRoute
   '/auth/openid/callback': typeof AuthOpenidCallbackRoute
   '/configuration': typeof AppConfigurationIndexRoute
@@ -110,6 +118,7 @@ export interface FileRoutesById {
   '/_app/users': typeof AppUsersRoute
   '/_app/integrations': typeof AppIntegrationsRoute
   '/_app/semantic': typeof AppSemanticRoute
+  '/_app/audit': typeof AppAuditRoute
   '/_app/': typeof AppIndexRoute
   '/auth/openid/callback': typeof AuthOpenidCallbackRoute
   '/_app/configuration/': typeof AppConfigurationIndexRoute
@@ -125,6 +134,7 @@ export interface FileRouteTypes {
     | '/users'
     | '/integrations'
     | '/semantic'
+    | '/audit'
     | '/auth/openid/callback'
     | '/configuration/'
   fileRoutesByTo: FileRoutesByTo
@@ -136,6 +146,7 @@ export interface FileRouteTypes {
     | '/users'
     | '/integrations'
     | '/semantic'
+    | '/audit'
     | '/'
     | '/auth/openid/callback'
     | '/configuration'
@@ -149,6 +160,7 @@ export interface FileRouteTypes {
     | '/_app/users'
     | '/_app/integrations'
     | '/_app/semantic'
+    | '/_app/audit'
     | '/_app/'
     | '/auth/openid/callback'
     | '/_app/configuration/'
@@ -204,6 +216,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSemanticRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/audit': {
+      id: '/_app/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof AppAuditRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/help': {
       id: '/_app/help'
       path: '/help'
@@ -249,6 +268,7 @@ interface AppRouteChildren {
   AppUsersRoute: typeof AppUsersRoute
   AppIntegrationsRoute: typeof AppIntegrationsRoute
   AppSemanticRoute: typeof AppSemanticRoute
+  AppAuditRoute: typeof AppAuditRoute
   AppIndexRoute: typeof AppIndexRoute
   AppConfigurationIndexRoute: typeof AppConfigurationIndexRoute
 }
@@ -260,6 +280,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppUsersRoute: AppUsersRoute,
   AppIntegrationsRoute: AppIntegrationsRoute,
   AppSemanticRoute: AppSemanticRoute,
+  AppAuditRoute: AppAuditRoute,
   AppIndexRoute: AppIndexRoute,
   AppConfigurationIndexRoute: AppConfigurationIndexRoute,
 }

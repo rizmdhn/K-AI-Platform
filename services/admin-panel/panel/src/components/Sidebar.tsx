@@ -36,6 +36,12 @@ const navItems: t.NavItem[] = [
     capability: SystemCapabilities.READ_USERS,
   },
   {
+    labelKey: 'com_nav_audit',
+    path: '/audit',
+    icon: 'history',
+    capability: SystemCapabilities.READ_USERS,
+  },
+  {
     labelKey: 'com_nav_access',
     path: '/access',
     icon: 'user',

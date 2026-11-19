@@ -38,9 +38,10 @@ class SummaryTests(unittest.TestCase):
     def test_summary_counts_last_outcomes_in_window(self):
         result = problems.summarize(LINES, NOW)
         self.assertEqual((result["calls_24h"], result["errors_24h"]), (5, 4))
-        self.assertEqual(result["users"][A], {"last_ok": "2026-11-09T09:00:00Z", "errors": 1, "denied": 0,
+        self.assertEqual(result["users"][A], {"last_ok": "2026-11-09T09:00:00Z", "errors": 1, "denied": 0, "blocked": 0,
                                               "last_error": {"outcome": "login_rejected", "at": "2026-11-09T10:00:00Z"}})
-        self.assertEqual(result["users"][B]["denied"], 2)
+        # ClickHouse refusals and kAI SQL-checker refusals are counted apart: only the first is a grant question.
+        self.assertEqual((result["users"][B]["denied"], result["users"][B]["blocked"]), (1, 1))
         self.assertEqual(result["users"][B]["last_error"]["outcome"], "error")
         text = json.dumps(result)
         for private in ("alice_ch", "f" * 64, "made_up_secret_value", "not-a-user"):
@@ -102,6 +103,46 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(body["audit_available"] or body["database_available"])
         self.assertNotIn("dsn secret", response.text)
+
+
+class LogTests(unittest.IsolatedAsyncioTestCase):
+    def write(self, directory):
+        with open(os.path.join(directory, "audit.jsonl.2026-11-01"), "w") as f:
+            f.write(line("2026-11-01T10:00:00Z", A, "ok", tool="execute_readonly_sql") + "\n")
+        old = NOW.timestamp() - 8 * 86400  # rotated a week ago: skipped by mtime for the 24 h view, read for 30 days
+        os.utime(os.path.join(directory, "audit.jsonl.2026-11-01"), (old, old))
+        with open(os.path.join(directory, "audit.jsonl"), "w") as f:
+            f.write("\n".join(l.replace('"outcome"', '"tool": "execute_readonly_sql", "outcome"') for l in LINES) + "\n")
+
+    def test_filters_counts_and_hides_sql(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.write(directory)
+            day = problems.read_log(directory, NOW, 1)
+            week = problems.read_log(directory, NOW, 30)
+            budi = problems.read_log(directory, NOW, 1, user=B, outcome="unsafe_sql")
+        self.assertEqual(day["total"], 6)  # in the last 24 h, valid user ids only, cancelled included
+        self.assertEqual(day["counts"], {"ok": 1, "login_rejected": 1, "access_denied": 1, "unsafe_sql": 1, "error": 1, "cancelled": 1})
+        self.assertEqual([r["ts"] for r in day["rows"]], sorted((r["ts"] for r in day["rows"]), reverse=True))
+        self.assertEqual(week["total"], 8)
+        self.assertEqual((budi["total"], budi["rows"][0]["ch_user"], budi["users"]), (1, "alice_ch", [A, B]))
+        text = json.dumps(day)
+        for private in ("f" * 64, "made_up_secret_value", "not-a-user"):
+            self.assertNotIn(private, text)
+
+    async def test_route_validates_and_requires_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.write(directory)
+            app = Starlette(routes=[Route("/a", problems.log_request)])
+            env = {"KAI_PLATFORM_INTERNAL_TOKEN": "internal-secret", "KAI_AUDIT_LOG_DIR": directory}
+            auth = {"Authorization": "Bearer internal-secret"}
+            with mock.patch.dict(os.environ, env):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
+                    self.assertEqual((await client.get("/a")).status_code, 401)
+                    for bad in ("days=2", "user=x", "outcome=drop", "tool=A;B"):
+                        self.assertEqual((await client.get(f"/a?{bad}", headers=auth)).status_code, 400)
+                    body = (await client.get("/a?days=90&outcome=access_denied", headers=auth)).json()
+        self.assertTrue(body["available"])
+        self.assertEqual(body["total"], 1)
 
 
 if __name__ == "__main__":

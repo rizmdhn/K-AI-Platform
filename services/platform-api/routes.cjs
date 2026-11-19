@@ -22,6 +22,10 @@ const problems = require("./problems.cjs").createProblems({
   VIEW: require("librechat-data-provider").PermissionBits.VIEW,
   USER: require("librechat-data-provider").PrincipalType.USER,
 });
+const auditLog = require("./audit_log.cjs").createAuditLog({
+  hasCapability: require("~/server/middleware/roles/capabilities").hasCapability,
+  findUsers: (ids) => require("mongoose").model("User").find({ _id: { $in: ids } }, { name: 1, email: 1 }).lean().maxTimeMS(3000),
+});
 const integrations = require("./integrations.cjs").createIntegrations({
   hasCapability: require("~/server/middleware/roles/capabilities").hasCapability,
 });
@@ -70,6 +74,7 @@ function installAdmin(router) {
   };
   router.get("/kai-problems", handle(problems.list));
   router.get("/kai-usage", handle(usage.summary));
+  router.get("/kai-audit", handle(auditLog.list));
   router.post("/kai-integrations/openmetadata/test", handle(integrations.test));
   router.post("/kai-integrations/smtp/test", handle(integrations.testSmtp));
   router.get("/kai-integrations/openmetadata/databases", handle(integrations.databases));

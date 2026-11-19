@@ -20,7 +20,8 @@ const MCP = {
   checks: { binding_dsn: true, keyring: true, warehouse_target: true },
   users: {
     [id("b")]: { last_ok: "2026-11-09T08:00:00Z", last_error: { outcome: "login_rejected", at: "2026-11-09T09:00:00Z" }, errors: 6, denied: 5 },
-    [id("e")]: { last_ok: "2026-11-09T10:00:00Z", last_error: { outcome: "login_rejected", at: "2026-11-09T09:00:00Z" }, errors: 1, denied: 0 },
+    [id("d")]: { last_ok: "2026-11-09T11:00:00Z", last_error: { outcome: "unsafe_sql", at: "2026-11-09T10:00:00Z" }, errors: 9, denied: 0, blocked: 9 },
+    [id("e")]: { last_ok: "2026-11-09T10:00:00Z", last_error: { outcome: "login_rejected", at: "2026-11-09T09:00:00Z" }, errors: 11, denied: 0, blocked: 10 },
     [id("g")]: { last_ok: null, last_error: { outcome: "login_rejected", at: "2026-11-09T09:00:00Z" }, errors: 1, denied: 0 },
   },
 };
@@ -52,6 +53,7 @@ test("flags each problem account and nothing for healthy ones", async () => {
     Ani: ["agent_without_binding"],
     Budi: ["ch_login_rejected", "many_denials"],
     Citra: ["cleanup_pending"],
+    Eko: ["many_blocked"], // SQL-checker refusals flag only from 10 (Dewi has 9), separately from ClickHouse denials
   });
   assert.deepEqual(result.system, []);
   assert.equal(calls[0].url, "http://clickhouse-mcp:8000/v1/internal/problems");

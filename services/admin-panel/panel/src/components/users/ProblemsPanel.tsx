@@ -1,19 +1,22 @@
 import { Badge, Button } from '@clickhouse/click-ui';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { problemsFn, type Problems } from '@/server/kaiAccounts';
+import { problemsFn, type AuditOutcome, type Problems } from '@/server/kaiAccounts';
 import { Notice } from './AccountFields';
 type Issue = Problems['accounts'][number]['issues'][number];
 type SystemIssue = Problems['system'][number];
 const time = (at?: string) => (at ? new Date(at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) : '');
 const checks: Record<string, string> = { binding_dsn: 'koneksi database metadata', keyring: 'kunci enkripsi', warehouse_target: 'alamat ClickHouse' };
 const parts = { warehouse: 'akses ClickHouse', chatbot: 'izin chatbot CH' } as const;
+/** Issues explained by audit entries open the access log filtered to that user and outcome. */
+const LOG_OUTCOME: Partial<Record<string, AuditOutcome>> = { many_denials: 'access_denied', many_blocked: 'unsafe_sql' };
 /** [problem, fix] for one account issue. */
 function accountText(issue: Issue): [string, string] {
   switch (issue.code) {
     case 'agent_without_binding': return ['Punya akses K-AI Analis Data, tetapi kredensial ClickHouse belum aktif.', 'Detail user → Akses data ClickHouse: isi kredensial, atau matikan akses chatbot.'];
     case 'ch_login_rejected': return [`ClickHouse menolak login tersimpan sejak ${time(issue.at)}. Password mungkin sudah berubah.`, 'Detail user → Akses data ClickHouse → Ganti password.'];
-    case 'many_denials': return [`${issue.count} penolakan akses data dalam 24 jam.`, 'Periksa grant ClickHouse akun ini atau pertanyaan pengguna.'];
+    case 'many_denials': return [`ClickHouse menolak ${issue.count} query dalam 24 jam karena hak akses.`, 'Lihat tabel/kolom yang diminta di log, lalu tambah grant ClickHouse bila memang perlu.'];
+    case 'many_blocked': return [`Pemeriksa SQL kAI menolak ${issue.count} query dalam 24 jam (mis. perintah ubah/hapus).`, 'Biasanya agent memperbaiki sendiri. Bila terus terjadi, cek pertanyaan pengguna di log.'];
     case 'cleanup_pending': return [`Akun nonaktif, tetapi pencabutan belum tuntas${issue.parts?.length ? `: ${issue.parts.map(part => parts[part]).join(', ')}` : ''}.`, 'Detail user → bagian Akun → klik Ulangi pembersihan akses.'];
     default: return [issue.code, ''];
   }
@@ -34,9 +37,10 @@ export function ProblemsPanel() {
   const query = useQuery({ queryKey: ['kaiProblems'], queryFn: () => problemsFn(), retry: false, refetchInterval: 60000 });
   const data = query.data;
   const total = data ? data.system.length + data.accounts.length : 0;
+  const badge = query.isPending ? 'Memuat' : String(total);
   return <section aria-label="Perlu perhatian" className="rounded-lg border border-(--cui-color-stroke-default) p-4">
     <div className="flex items-center justify-between gap-2">
-      <h2 className="font-medium">Perlu perhatian <Badge text={query.isPending ? 'Memuat' : query.isError ? 'Tidak tersedia' : String(total)} state={total ? 'warning' : 'neutral'} /></h2>
+      <h2 className="font-medium">Perlu perhatian <Badge text={query.isError ? 'Tidak tersedia' : badge} state={total ? 'warning' : 'neutral'} /></h2>
       <Button type="secondary" label="Periksa ulang" disabled={query.isFetching} onClick={() => void query.refetch()} />
     </div>
     {query.isError && <div className="mt-2"><Notice tone="error">Daftar masalah belum tersedia.</Notice></div>}
@@ -48,7 +52,9 @@ export function ProblemsPanel() {
         {data.accounts.flatMap(account => account.issues.map(issue => { const [problem, fix] = accountText(issue); return <tr key={`${account.id}-${issue.code}`} className="border-t border-(--cui-color-stroke-default) align-top">
           <td className="py-2 pr-4"><div className="font-medium">{account.name || account.email}</div><div className="text-xs text-(--cui-color-text-muted)">{account.email}</div></td>
           <td className="py-2 pr-4">{problem}</td>
-          <td className="py-2">{fix} <Link to="/users" className="underline">Buka Users</Link></td>
+          <td className="py-2">{fix} {LOG_OUTCOME[issue.code]
+            ? <Link to="/audit" search={{ days: 1, user: account.id, outcome: LOG_OUTCOME[issue.code] }} className="underline">Lihat log</Link>
+            : <Link to="/users" className="underline">Buka Users</Link>}</td>
         </tr>; }))}
       </tbody>
     </table></div>}
