@@ -1,4 +1,4 @@
-// Admin data access log: the MCP audit (who called which data tool, outcome, rows, duration; never SQL text or
+// Admin data access log, one page (100 rows, newest first) at a time: the MCP audit table (who called which data tool, outcome, rows, duration; never SQL text or
 // results), with platform names attached. Read-only; same permission as the usage dashboard.
 const { AccountError } = require("./accounts.cjs");
 const MCP_URL = "http://clickhouse-mcp:8000/v1/internal/audit";
@@ -19,8 +19,9 @@ function createAuditLog({ hasCapability, findUsers, fetchImpl = fetch }) {
     if (q.user) { if (!USER.test(q.user)) throw new AccountError("Isian tidak valid.", 400); params.set("user", q.user); }
     if (q.outcome) { if (!OUTCOMES.has(q.outcome)) throw new AccountError("Isian tidak valid.", 400); params.set("outcome", q.outcome); }
     if (q.tool) { if (!TOOL.test(q.tool)) throw new AccountError("Isian tidak valid.", 400); params.set("tool", q.tool); }
+    if (q.cursor) { if (!/^[A-Za-z0-9_-]{1,32}$/.test(q.cursor)) throw new AccountError("Isian tidak valid.", 400); params.set("cursor", q.cursor); }
     const token = process.env.KAI_PLATFORM_INTERNAL_TOKEN;
-    const unavailable = { days, available: false, rows: [], counts: {}, total: 0, tools: [], users: [], partial: false };
+    const unavailable = { days, available: false, rows: [], counts: {}, total: 0, tools: [], users: [], next_cursor: null };
     if (!token) return unavailable;
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
     let log;
@@ -39,7 +40,7 @@ function createAuditLog({ hasCapability, findUsers, fetchImpl = fetch }) {
     const people = new Map((ids.length ? await findUsers(ids) : []).map((u) => [String(u._id), u]));
     const person = (u) => ({ id: u, name: people.get(u)?.name || null, email: people.get(u)?.email || null });
     return {
-      days, available: true, partial: !!log.partial, total: log.total, counts: log.counts, tools: log.tools,
+      days, available: true, next_cursor: log.next_cursor ?? null, total: log.total, counts: log.counts, tools: log.tools,
       users: ids.map(person),
       rows: log.rows.map((r) => ({ ...r, name: people.get(r.user)?.name || null, email: people.get(r.user)?.email || null })),
     };

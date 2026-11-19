@@ -13,11 +13,11 @@ export const SEMANTIC_TABS: SemanticTab[] = ['overview', 'review', 'all', 'ai'];
 export function SemanticPage({ tab, onTab }: { tab: SemanticTab; onTab: (tab: SemanticTab) => void }) {
   const { hasCapability } = useCapabilities();
   const canManage = hasCapability(SystemCapabilities.MANAGE_CONFIGS);
-  const query = useQuery({ queryKey: ['kaiSemantic'], queryFn: () => semanticListFn(), retry: false });
+  const query = useQuery({ queryKey: ['kaiSemantic', 'summary'], queryFn: () => semanticListFn({ data: { size: 10 } }), retry: false });
   const databases = useQuery({ queryKey: ['kaiSemanticDatabases'], queryFn: () => semanticDatabasesFn(), retry: false, enabled: canManage });
-  const rows = query.data?.definitions ?? [];
-  const drafts = rows.filter(r => r.status === 'draft').length;
-  const labels: Record<SemanticTab, string> = { overview: 'Ringkasan', review: `Tinjau draf${drafts ? ` (${drafts})` : ''}`, all: 'Semua definisi', ai: 'Buat draf AI' };
+  const drafts = query.data?.counts.draft ?? 0;
+  const names = databases.data?.databases.map(d => d.name) ?? [];
+  const labels: Record<SemanticTab, string> = { overview: 'Ringkasan', review: `Tinjau draf${drafts ? ` (${drafts.toLocaleString('id-ID')})` : ''}`, all: 'Semua definisi', ai: 'Buat draf AI' };
   return <div className="flex flex-col gap-4 p-4 md:p-6">
     <header className="flex flex-col gap-1">
       <h1 className="text-xl font-medium">Semantic layer</h1>
@@ -31,9 +31,9 @@ export function SemanticPage({ tab, onTab }: { tab: SemanticTab; onTab: (tab: Se
     {query.data && !query.data.storage_available && <Notice tone="warning">Penyimpanan semantic layer belum disiapkan di server (jalankan make migrate).</Notice>}
     {query.isPending && <p role="status" className="text-sm text-(--cui-color-text-muted)">Memuat…</p>}
     {query.data?.storage_available && <div role="tabpanel" aria-label={labels[tab]}>
-      {tab === 'overview' && <Overview rows={rows} databases={databases.data?.databases ?? null} />}
-      {tab === 'review' && <Browser key="review" rows={rows} mode="review" canManage={canManage} />}
-      {tab === 'all' && <Browser key="all" rows={rows} mode="all" canManage={canManage} />}
+      {tab === 'overview' && <Overview databases={databases.data?.databases ?? null} canManage={canManage} />}
+      {tab === 'review' && <Browser key="review" mode="review" canManage={canManage} databases={names} />}
+      {tab === 'all' && <Browser key="all" mode="all" canManage={canManage} databases={names} />}
       {tab === 'ai' && <div className="grid gap-4 xl:grid-cols-2"><LocalModels canManage={canManage} /><DraftJob canManage={canManage} onReview={() => onTab('review')} /></div>}
     </div>}
   </div>;

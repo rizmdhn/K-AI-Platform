@@ -75,6 +75,23 @@ test("semantic layer: session editor id, known fields only, write needs manage:c
   await assert.rejects(viewer.api.semanticDelete(req({}, { id })), { status: 403 });
 });
 
+test("semantic paging, tables and bulk: only listed query keys pass, the admin id is server-set, queue start needs a list", async () => {
+  const { api, calls } = build();
+  const req = (extra) => ({ user: { id: ADMIN, role: "ADMIN" }, params: {}, ...extra });
+  await api.semanticList(req({ query: { status: "draft", size: "50", sort: "name", evil: "x", q: ["a", "b"] } }));
+  assert.match(calls[0].url, /internal\/semantic\?status=draft&sort=name&size=50$/);
+  await api.semanticTables(req({ query: { database: "gold_mart", page: "2", user: "c".repeat(24) } }));
+  assert.match(calls[1].url, new RegExp(`/semantic/tables\\?database=gold_mart&page=2&user=${ADMIN}$`));
+  await api.semanticBulk(req({ body: { status: "approved", ids: ["x"], updated_by: "c".repeat(24) } }));
+  assert.deepEqual(JSON.parse(calls[2].init.body), { status: "approved", updated_by: ADMIN, ids: ["x"] });
+  await api.semanticDraftStart(req({ body: { databases: ["kai_demo", "gold_mart"] } }));
+  assert.deepEqual(JSON.parse(calls[3].init.body), { databases: ["kai_demo", "gold_mart"], updated_by: ADMIN });
+  await assert.rejects(api.semanticDraftStart(req({ body: { database: "kai_demo" } })), { status: 400 });
+  const viewer = build(["access:admin", "read:configs"]);
+  await assert.rejects(viewer.api.semanticBulk(req({ body: { status: "approved", ids: ["x"] } })), { status: 403 });
+  await assert.rejects(viewer.api.semanticTables(req({ query: { database: "x" } })), { status: 403 });
+});
+
 test("local models: viewers read state; actions need manage:configs and only known actions/models are forwarded", async () => {
   const { api, calls } = build();
   const req = (body, params = {}) => ({ user: { id: ADMIN, role: "ADMIN" }, params, body });

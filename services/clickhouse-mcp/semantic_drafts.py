@@ -14,7 +14,6 @@ in Postgres if jobs must survive restarts.
 import asyncio
 import json
 import logging
-import math
 import os
 import re
 import time
@@ -36,7 +35,8 @@ from integration_settings import SettingsError, _authorized, _body
 from tool_errors import GatewayError
 
 MODEL_URL = os.getenv("KAI_DRAFT_MODEL_URL", "").rstrip("/")
-GROUP = 5  # tables per model call: small enough for a 7B model on CPU to stay accurate
+GROUP = 3  # tables per model call: room for a join, small enough for steady progress and an accurate 7B model
+MAX_QUEUE = 20  # databases per job
 MAX_TABLES = 2000
 MAX_COLUMNS = 60  # per table in the prompt; very wide tables are cut, the panel says so
 MODEL_TIMEOUT = 900  # seconds per group; CPU inference is slow by design here
@@ -201,7 +201,49 @@ async def _keep(job, overrides, admin, by_ref, kind, draft):
         _issue(job, item, str(error))
 
 
-async def _run(job, admin, database):
+async def _run_database(job, entry, overrides, admin):
+    database = entry["database"]
+    entry["status"] = "running"
+    job.update(current_database=database, phase="Membaca skema", current=[])
+    tables = await asyncio.to_thread(_catalog, overrides, database)
+    covered = await asyncio.to_thread(semantic.covered_tables, os.environ, database)
+    todo = [t for t in tables if t["ref"] not in covered]
+    by_ref = {t["ref"]: t for t in tables}
+    job["tables_total"] += len(todo) - entry["tables_todo"]  # the real count replaces the estimate made at start
+    entry.update(tables_total=len(tables), tables_existing=len(tables) - len(todo), tables_todo=len(todo),
+                 tables_wide=sum(len(t["columns"]) > MAX_COLUMNS for t in todo))
+    if not tables:
+        entry.update(status="failed", message="Tidak ada tabel yang bisa dibaca akun ClickHouse ini.")
+        return
+    for start in range(0, len(todo), GROUP):
+        if _cancel.is_set():
+            entry["status"] = "cancelled"
+            return
+        group = todo[start: start + GROUP]
+        job.update(phase="Model lokal menulis draf", current=[t["name"] for t in group], group_started_at=_now())
+        began = time.monotonic()
+        try:
+            drafts = await _ask_model(group, job["model"])
+        except (httpx.HTTPError, ValidationError, KeyError, ValueError) as error:
+            for t in group:
+                _issue(job, f"tabel {t['ref']}", f"model lokal gagal ({type(error).__name__})")
+            drafts = Drafts(metrics=[], verified_queries=[])
+        job["model_seconds"] += time.monotonic() - began
+        job["phase"] = "Memeriksa draf di ClickHouse"
+        saved, skipped = job["drafts_saved"], job["drafts_skipped"]
+        for draft in drafts.metrics:
+            await _keep(job, overrides, admin, by_ref, "metric", draft)
+        for draft in drafts.verified_queries:
+            await _keep(job, overrides, admin, by_ref, "verified_query", draft)
+        entry["drafts_saved"] += job["drafts_saved"] - saved
+        entry["drafts_skipped"] += job["drafts_skipped"] - skipped
+        entry["tables_done"] += len(group)
+        job["tables_done"] += len(group)
+        job["seconds_per_table"] = round(job["model_seconds"] / job["tables_done"], 1)
+    entry["status"] = "done"
+
+
+async def _run(job, admin):
     started = time.monotonic()
     ch_user = None
     try:
@@ -211,76 +253,80 @@ async def _run(job, admin, database):
             raise SettingsError("Akun admin Anda belum punya akses data ClickHouse yang aktif. Atur di Users → "
                                 "detail akun Anda → Akses data ClickHouse, lalu coba lagi.") from None
         overrides = await asyncio.to_thread(_overrides, ch_user, password)
-        job["phase"] = "Membaca skema"
-        tables = await asyncio.to_thread(_catalog, overrides, database)
-        if not tables:
-            raise SettingsError("Database ini tidak punya tabel yang bisa dibaca akun ClickHouse Anda.")
-        covered = {ref for row in await asyncio.to_thread(semantic.list_definitions) for ref in row["tables"]}
-        todo = [t for t in tables if t["ref"] not in covered]
-        by_ref = {t["ref"]: t for t in tables}
-        job.update(tables_total=len(tables), tables_existing=len(tables) - len(todo),
-                   tables_wide=sum(len(t["columns"]) > MAX_COLUMNS for t in todo),
-                   groups_total=math.ceil(len(todo) / GROUP))
-        for start in range(0, len(todo), GROUP):
+        # Rough totals up front (tables minus already covered) so the queue has an ETA before the first database ends.
+        names = [e["database"] for e in job["queue"]]
+        counts = {r["database"]: r["n"] for r in await asyncio.to_thread(
+            _query, overrides, "SELECT database, count() AS n FROM system.tables WHERE database IN {dbs:Array(String)} "
+            "AND NOT is_temporary GROUP BY database", {"dbs": names})}
+        covered = await asyncio.to_thread(semantic.covered_tables)
+        for entry in job["queue"]:
+            done = sum(1 for ref in covered if ref.split(".", 1)[0] == entry["database"])
+            entry["tables_todo"] = max(0, counts.get(entry["database"], 0) - done)
+        job["tables_total"] = sum(e["tables_todo"] for e in job["queue"])
+        for entry in job["queue"]:
             if _cancel.is_set():
-                job["status"] = "cancelled"
-                break
-            group = todo[start: start + GROUP]
-            job.update(phase="Menunggu model lokal", current=[t["name"] for t in group])
-            began = time.monotonic()
-            try:
-                drafts = await _ask_model(group, job["model"])
-            except (httpx.HTTPError, ValidationError, KeyError, ValueError) as error:
-                for t in group:
-                    _issue(job, f"tabel {t['name']}", f"model lokal gagal ({type(error).__name__})")
-                drafts = Drafts(metrics=[], verified_queries=[])
-            job["phase"] = "Memeriksa draf di ClickHouse"
-            for draft in drafts.metrics:
-                await _keep(job, overrides, admin, by_ref, "metric", draft)
-            for draft in drafts.verified_queries:
-                await _keep(job, overrides, admin, by_ref, "verified_query", draft)
-            job["groups_done"] += 1
-            job["tables_done"] += len(group)
-            spent = time.monotonic() - began
-            job["seconds_per_group"] = round(spent if job["groups_done"] == 1
-                                             else (job["seconds_per_group"] * (job["groups_done"] - 1) + spent) / job["groups_done"])
-        if job["status"] == "running":
-            job["status"] = "done"
+                entry["status"] = "cancelled"
+                continue
+            await _run_database(job, entry, overrides, admin)
+        job["status"] = "cancelled" if _cancel.is_set() else "done"
     except SettingsError as error:
         job.update(status="failed", message=str(error))
     except Exception:
         job.update(status="failed", message="Job berhenti karena kesalahan tak terduga. Draf yang sudah tersimpan tetap ada.")
         logging.getLogger(__name__).exception("semantic draft job failed")
     finally:
-        job.update(finished_at=_now(), current=[], phase=None)
+        for entry in job["queue"]:
+            if entry["status"] in ("waiting", "running"):
+                entry["status"] = "cancelled" if job["status"] == "cancelled" else "failed"
+        job.update(finished_at=_now(), current=[], phase=None, current_database=None, group_started_at=None)
         outcome = {"done": "ok", "cancelled": "cancelled"}.get(job["status"], "error")
         audit.info(json.dumps({"request_id": job["id"], "tool": "semantic_draft_job", "ch_user": ch_user,
-                               "librechat_user": admin, "database": database, "outcome": outcome,
-                               "rows": job["drafts_saved"], "duration_ms": round((time.monotonic() - started) * 1000)},
-                              separators=(",", ":")))
+                               "librechat_user": admin, "database": ",".join(e["database"] for e in job["queue"])[:256],
+                               "outcome": outcome, "rows": job["drafts_saved"],
+                               "duration_ms": round((time.monotonic() - started) * 1000)}, separators=(",", ":")))
 
 
 def _public():
+    """Job state for the panel; eta_seconds = remaining tables x measured seconds per table, minus the running group."""
     if not _job:
         return None
-    job = dict(_job)
-    remaining = job["groups_total"] - job["groups_done"]
-    job["eta_seconds"] = remaining * job["seconds_per_group"] if job["status"] == "running" and job["seconds_per_group"] else None
+    job = {k: v for k, v in _job.items() if k != "model_seconds"}
+    job["queue"] = [dict(e) for e in _job["queue"]]
+    job["eta_seconds"] = None
+    if job["status"] == "running" and job["seconds_per_table"]:
+        elapsed = 0
+        if job["group_started_at"]:
+            elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(job["group_started_at"])).total_seconds()
+        remaining = max(0, job["tables_total"] - job["tables_done"])
+        job["eta_seconds"] = max(0, round(remaining * job["seconds_per_table"] - elapsed))
     return job
 
 
-def start(database, admin):
+def start(databases, admin):
     global _task
     if _job.get("status") == "running":
         raise SettingsError("Job lain sedang berjalan. Tunggu sampai selesai atau hentikan dulu.")
     _cancel.clear()
     _job.clear()
-    _job.update(id=uuid.uuid4().hex, status="running", database=database, started_by=admin, started_at=_now(),
-                finished_at=None, phase="Menyiapkan", current=[], tables_total=0, tables_existing=0, tables_wide=0,
-                tables_done=0, groups_total=0, groups_done=0, drafts_saved=0, drafts_skipped=0, issues=[],
-                seconds_per_group=None, message=None, model=local_models.active())
-    _task = asyncio.create_task(_run(_job, admin, database))
+    _job.update(id=uuid.uuid4().hex, status="running", started_by=admin, started_at=_now(), finished_at=None,
+                phase="Menyiapkan", current=[], current_database=None, group_started_at=None,
+                queue=[{"database": d, "status": "waiting", "tables_total": None, "tables_existing": None, "tables_todo": 0,
+                        "tables_wide": 0, "tables_done": 0, "drafts_saved": 0, "drafts_skipped": 0, "message": None}
+                       for d in databases],
+                tables_total=0, tables_done=0, drafts_saved=0, drafts_skipped=0, issues=[], seconds_per_table=None,
+                model_seconds=0.0, message=None, model=local_models.active())
+    _task = asyncio.create_task(_run(_job, admin))
     return _public()
+
+
+def _databases(body):
+    names = body.get("databases")
+    if isinstance(body.get("database"), str):
+        names = [body["database"]]
+    if (not isinstance(names, list) or not 1 <= len(names) <= MAX_QUEUE or len(set(names)) != len(names)
+            or not all(isinstance(n, str) and DATABASE.fullmatch(n) and n not in HIDDEN for n in names)):
+        raise SettingsError(f"Pilih 1 sampai {MAX_QUEUE} database yang valid.")
+    return names
 
 
 async def drafts_request(request):
@@ -289,15 +335,16 @@ async def drafts_request(request):
     try:
         if request.method == "POST":
             body = await _body(request)
-            admin, database = body.get("updated_by"), body.get("database")
+            if not isinstance(body, dict):
+                raise SettingsError("Isian tidak valid.")
+            admin = body.get("updated_by")
             if not isinstance(admin, str) or not semantic.USER.fullmatch(admin):
                 raise SettingsError("Isian tidak valid.")
-            if not isinstance(database, str) or not DATABASE.fullmatch(database) or database in HIDDEN:
-                raise SettingsError("Pilih database yang valid.")
+            databases = _databases(body)
             status = await model_status()
             if status != "ready":
                 return JSONResponse({"message": MODEL_MESSAGES[status]}, status_code=409)
-            start(database, admin)
+            start(databases, admin)
         elif request.method == "DELETE" and _job.get("status") == "running":
             _cancel.set()
             _job["phase"] = "Menghentikan setelah kelompok tabel ini"
@@ -324,14 +371,84 @@ async def databases_request(request):
         rows = await asyncio.to_thread(_query, overrides, "SELECT database, count() AS tables FROM system.tables "
                                        f"WHERE database NOT IN {HIDDEN} AND NOT is_temporary GROUP BY database ORDER BY database")
         covered = {}
-        for row in await asyncio.to_thread(semantic.list_definitions):
-            for ref in row["tables"]:
-                covered.setdefault(ref.split(".", 1)[0], set()).add(ref)
+        for ref in await asyncio.to_thread(semantic.covered_tables):
+            covered[ref.split(".", 1)[0]] = covered.get(ref.split(".", 1)[0], 0) + 1
         return JSONResponse({"databases": [{"name": r["database"], "tables": r["tables"],
-                                            "covered": len(covered.get(r["database"], ()))} for r in rows]},
+                                            "covered": covered.get(r["database"], 0)} for r in rows]},
                             headers={"Cache-Control": "no-store"})
     except Exception:
         return JSONResponse({"message": "Daftar database tidak bisa dibaca dari ClickHouse."}, status_code=503)
+
+
+TABLE_STATUSES = ("none", "draft", "partial", "approved", "rejected")
+TABLE_SORTS = ("name", "metrics", "queries", "drafts", "status", "rows")
+_table_cache = {}  # (admin, database) -> (monotonic time, tables); the panel pages through the same list
+
+
+def _table_status(item):
+    if item["approved"] and item["draft"]:
+        return "partial"
+    if item["approved"]:
+        return "approved"
+    if item["draft"]:
+        return "draft"
+    return "rejected" if item["rejected"] else "none"
+
+
+def table_page(tables, covered, query):
+    """Coverage row per table, filtered, sorted and paged like any admin table."""
+    status, words = query.get("status") or "", (query.get("q") or "").strip().lower()
+    size, page = semantic._number(query.get("size"), 25), semantic._number(query.get("page"), 1)
+    sort, direction = query.get("sort") or "name", (query.get("dir") or "asc").lower()
+    if (status and status not in TABLE_STATUSES) or len(words) > 100 or size not in semantic.PAGE_SIZES \
+            or not 1 <= page <= 100000 or sort not in TABLE_SORTS or direction not in ("asc", "desc"):
+        raise SettingsError("Pengaturan tabel tidak valid.")
+    empty = {"metric": 0, "verified_query": 0, "draft": 0, "approved": 0, "rejected": 0}
+    rows = []
+    for t in tables:
+        item = covered.get(t["ref"], empty)
+        rows.append({"name": t["name"], "ref": t["ref"], "comment": t.get("comment") or "", "rows": t.get("total_rows"),
+                     "metrics": item["metric"], "queries": item["verified_query"], "drafts": item["draft"],
+                     "approved": item["approved"], "rejected": item["rejected"], "status": _table_status(item)})
+    counts = {s: 0 for s in TABLE_STATUSES}
+    for row in rows:
+        counts[row["status"]] += 1
+    rows = [r for r in rows if (not status or r["status"] == status)
+            and (not words or words in r["name"].lower() or words in r["comment"].lower())]
+    order = {s: i for i, s in enumerate(TABLE_STATUSES)}
+    key = {"status": lambda r: order[r["status"]], "rows": lambda r: r["rows"] or 0}.get(sort, lambda r: r[sort])
+    rows.sort(key=lambda r: (key(r), r["name"]), reverse=direction == "desc")
+    return {"tables": rows[(page - 1) * size: page * size], "total": len(rows), "counts": counts}
+
+
+async def tables_request(request):
+    """Every table of one database the admin's ClickHouse account can read, with its semantic coverage."""
+    if not _authorized(request):
+        return JSONResponse({"message": "Unauthorized."}, status_code=401)
+    query = dict(request.query_params)
+    admin, database = query.get("user", ""), query.get("database", "")
+    if not semantic.USER.fullmatch(admin) or not DATABASE.fullmatch(database) or database in HIDDEN:
+        return JSONResponse({"message": "Isian tidak valid."}, status_code=400)
+    try:
+        user, password = await get_managed_credentials(admin)
+    except GatewayError:
+        return JSONResponse({"message": "Akun admin Anda belum punya akses data ClickHouse yang aktif. Atur di Users → "
+                                        "detail akun Anda → Akses data ClickHouse."}, status_code=400)
+    try:
+        cached = _table_cache.get((admin, database))
+        if not cached or time.monotonic() - cached[0] > 60:
+            overrides = await asyncio.to_thread(_overrides, user, password)
+            tables = [{**t, "ref": f"{database}.{t['name']}"} for t in await asyncio.to_thread(
+                _query, overrides, "SELECT name, comment, total_rows FROM system.tables WHERE database = {db:String} "
+                f"AND NOT is_temporary AND name NOT LIKE '.%' ORDER BY name LIMIT {MAX_TABLES}", {"db": database})]
+            cached = _table_cache[(admin, database)] = (time.monotonic(), tables)
+        covered = await asyncio.to_thread(semantic.covered_tables, os.environ, database)
+        return JSONResponse({"database": database, **table_page(cached[1], covered, query)},
+                            headers={"Cache-Control": "no-store"})
+    except SettingsError as error:
+        return JSONResponse({"message": str(error)}, status_code=400)
+    except Exception:
+        return JSONResponse({"message": "Daftar tabel tidak bisa dibaca dari ClickHouse."}, status_code=503)
 
 
 async def models_request(request):
@@ -365,6 +482,7 @@ def register_draft_routes(mcp):
     # Before semantic.register_semantic_routes: "/semantic/{definition_id}" would otherwise catch these paths.
     mcp.custom_route("/v1/internal/semantic/drafts", methods=["GET", "POST", "DELETE"])(drafts_request)
     mcp.custom_route("/v1/internal/semantic/databases", methods=["GET"])(databases_request)
+    mcp.custom_route("/v1/internal/semantic/tables", methods=["GET"])(tables_request)
     mcp.custom_route("/v1/internal/semantic/models", methods=["GET"])(models_request)
     mcp.custom_route("/v1/internal/semantic/models/download", methods=["POST", "DELETE"])(models_request)
     mcp.custom_route("/v1/internal/semantic/models/activate", methods=["POST"])(models_request)

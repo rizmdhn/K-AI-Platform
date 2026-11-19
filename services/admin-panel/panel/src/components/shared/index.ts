@@ -1,5 +1,6 @@
 export { AccessDenied } from './AccessDenied';
 export { AddItemButton } from './AddItemButton';
+export { DataTable } from './DataTable';
 export { Avatar } from './Avatar';
 export { EditButton } from './EditButton';
 export { EmptyState } from './EmptyState';

@@ -116,6 +116,38 @@ export interface PaginationProps {
   onPageChange: (page: number) => void;
 }
 
+/** One column of a server-paged DataTable; `sortKey` makes the header clickable. */
+export interface DataTableColumn<T> {
+  key: string;
+  label: string;
+  render: (row: T) => ReactNode;
+  sortKey?: string;
+  align?: 'left' | 'right';
+  className?: string;
+}
+
+export interface DataTableProps<T> {
+  caption: string;
+  columns: DataTableColumn<T>[];
+  rows: T[];
+  rowKey: (row: T) => string;
+  total: number;
+  page: number;
+  size: number;
+  sizes?: readonly number[];
+  onPage: (page: number) => void;
+  onSize: (size: number) => void;
+  sort?: string;
+  dir?: 'asc' | 'desc';
+  onSort?: (sort: string, dir: 'asc' | 'desc') => void;
+  selected?: ReadonlySet<string>;
+  onSelect?: (next: Set<string>) => void;
+  onRowClick?: (row: T) => void;
+  activeKey?: string | null;
+  loading?: boolean;
+  empty: string;
+}
+
 export interface UserSearchInlineProps {
   existingIds: string[];
   onAdd: (user: AdminUserSearchResult) => void;

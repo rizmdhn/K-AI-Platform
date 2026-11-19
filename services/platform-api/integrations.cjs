@@ -51,6 +51,12 @@ function createIntegrations({ hasCapability, fetchImpl = fetch }) {
     if (!UUID.test(String(req.params?.id ?? ""))) throw new AccountError("Definisi tidak ditemukan.", 404);
     return `/${req.params.id}`;
   };
+  // Only listed string query keys reach the MCP, which validates every value.
+  const pick = (query, keys) => {
+    const params = new URLSearchParams();
+    for (const key of keys) if (typeof query?.[key] === "string" && query[key] && query[key].length <= 200) params.set(key, query[key]);
+    return params;
+  };
   const semanticForm = (body) => Object.fromEntries(SEMANTIC_FIELDS.filter((k) => body && Object.hasOwn(body, k)).map((k) => [k, body[k]]));
   const form = (name, body) => Object.fromEntries(SECTIONS[name].filter((k) => body && Object.hasOwn(body, k)).map((k) => [k, body[k]]));
   return {
@@ -58,7 +64,22 @@ function createIntegrations({ hasCapability, fetchImpl = fetch }) {
     save: async (req) => { const name = section(req); const id = await allowed(req, true); return mcp(name, "PUT", { ...form(name, req.body), updated_by: id }); },
     test: async (req) => { await allowed(req, true); return mcp("openmetadata/test", "POST", form("openmetadata", req.body)); },
     databases: async (req) => { await allowed(req, false); return mcp("openmetadata/databases", "GET"); },
-    semanticList: async (req) => { await allowed(req, false); return mcp("", "GET", undefined, SEMANTIC); },
+    semanticList: async (req) => {
+      await allowed(req, false);
+      const params = pick(req.query, ["status", "kind", "source", "database", "table", "q", "sort", "dir", "page", "size"]);
+      return mcp(params.size ? `?${params}` : "", "GET", undefined, SEMANTIC);
+    },
+    semanticBulk: async (req) => {
+      const id = await allowed(req, true);
+      const { status, ids, filter } = req.body ?? {};
+      return mcp("/bulk", "POST", { status, updated_by: id, ...(ids !== undefined ? { ids } : { filter }) }, SEMANTIC);
+    },
+    semanticTables: async (req) => {
+      const id = await allowed(req, true);
+      const params = pick(req.query, ["database", "status", "q", "sort", "dir", "page", "size"]);
+      params.set("user", id);
+      return mcp(`/tables?${params}`, "GET", undefined, SEMANTIC);
+    },
     semanticCreate: async (req) => { const id = await allowed(req, true); return mcp("", "POST", { ...semanticForm(req.body), updated_by: id }, SEMANTIC); },
     semanticUpdate: async (req) => { const path = definition(req); const id = await allowed(req, true); return mcp(path, "PUT", { ...semanticForm(req.body), updated_by: id }, SEMANTIC); },
     semanticDelete: async (req) => { const path = definition(req); const id = await allowed(req, true); return mcp(path, "DELETE", { updated_by: id }, SEMANTIC); },
@@ -66,8 +87,9 @@ function createIntegrations({ hasCapability, fetchImpl = fetch }) {
     semanticDrafts: async (req) => { await allowed(req, false); return mcp("/drafts", "GET", undefined, SEMANTIC); },
     semanticDraftStart: async (req) => {
       const id = await allowed(req, true);
-      if (typeof req.body?.database !== "string") throw new AccountError("Pilih database.");
-      return mcp("/drafts", "POST", { database: req.body.database, updated_by: id }, SEMANTIC);
+      const databases = req.body?.databases;
+      if (!Array.isArray(databases) || !databases.length || !databases.every((d) => typeof d === "string")) throw new AccountError("Pilih database.");
+      return mcp("/drafts", "POST", { databases, updated_by: id }, SEMANTIC);
     },
     semanticDraftStop: async (req) => { await allowed(req, true); return mcp("/drafts", "DELETE", {}, SEMANTIC); },
     /** Local model manager (catalog download with checksum, pause/resume, activate, delete); viewing needs read:configs. */

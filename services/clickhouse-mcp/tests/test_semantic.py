@@ -86,9 +86,40 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
                 create.assert_not_called()
                 response = await semantic.definitions_request(self.request("PUT", {**METRIC, "updated_by": "b" * 24}, "not-a-uuid"))
                 self.assertEqual(response.status_code, 400)
-            with mock.patch.object(semantic, "list_definitions", return_value=[{"name": "x"}]):
-                body = json.loads((await semantic.definitions_request(self.request("GET"))).body)
-            self.assertEqual((body["definitions"], body["storage_available"]), ([{"name": "x"}], True))
+            page = {"definitions": [{"name": "x"}], "total": 1, "counts": {"draft": 1}, "storage_available": True}
+            with mock.patch.object(semantic, "page_definitions", return_value=page) as listed:
+                request = self.request("GET")
+                request.query_params = {"status": "draft", "size": "50"}
+                body = json.loads((await semantic.definitions_request(request)).body)
+            self.assertEqual((body["definitions"], body["total"]), ([{"name": "x"}], 1))
+            self.assertEqual(listed.call_args.args[0], {"status": "draft", "size": "50"})
+
+
+class PagingTests(unittest.TestCase):
+    def test_filters_build_parameterized_sql_and_escape_like(self):
+        where, params = semantic._filters({"status": "draft", "kind": "metric", "database": "kai_demo",
+                                            "table": "kai_demo.penjualan", "q": "50%_off"})
+        self.assertIn("status = %s", where)
+        self.assertIn("tables @> ARRAY[%s]::text[]", where)
+        self.assertEqual(params[:4], ["draft", "metric", "kai_demo", "kai_demo.penjualan"])
+        self.assertEqual(params[4], "%50\\%\\_off%")
+        self.assertNotIn("50%_off", where)  # values never reach the SQL text
+
+    def test_bad_filters_and_table_settings_are_refused_before_any_query(self):
+        for query in ({"status": "live"}, {"kind": "x"}, {"database": "a;b"}, {"table": "nodot"}, {"q": "x" * 101}):
+            with self.assertRaises(semantic.SettingsError):
+                semantic._filters(query)
+        for query in ({"size": "7"}, {"page": "0"}, {"sort": "definition"}, {"dir": "sideways"}, {"size": "abc"}):
+            with self.assertRaises(semantic.SettingsError):
+                semantic.page_definitions(query, env={})
+
+    def test_bulk_needs_ids_or_a_narrowing_filter(self):
+        env = {"KAI_CATALOG_DSN": "postgresql://x"}
+        base = {"status": "approved", "updated_by": "b" * 24}
+        for body in ({**base}, {**base, "ids": []}, {**base, "ids": ["not-a-uuid"]}, {**base, "ids": ["0" * 8 + "-0000-0000-0000-" + "0" * 12] * 1001},
+                     {**base, "filter": {}}, {**base, "filter": {"status": "nope"}}, {**base, "status": "live", "ids": []}):
+            with self.assertRaises(semantic.SettingsError):
+                semantic.bulk_status(body, env)
 
 
 class FakeConnection:

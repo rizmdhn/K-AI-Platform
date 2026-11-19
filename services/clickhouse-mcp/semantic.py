@@ -30,7 +30,11 @@ TABLE = re.compile(r"([A-Za-z0-9_-]{1,128})\.([A-Za-z0-9_-]{1,128})")
 USER = re.compile(r"[0-9a-f]{24}")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 MAX_TEXT, MAX_EXPRESSION, MAX_SQL, MAX_LIST = 500, 1000, 4000, 30
-MAX_DRAFTS = 2000  # caps AI drafts waiting for review, so repeated jobs cannot flood the queue
+MAX_DRAFTS = 20000  # caps AI drafts waiting for review (~500 tables x a few drafts each, many times over)
+PAGE_SIZES = (10, 25, 50, 100)
+SORTS = {"name": "name", "updated_at": "updated_at", "kind": "kind", "status": "status", "table": "tables[1]"}
+MAX_BULK = 1000  # ids per bulk request; "everything matching the filter" goes through the filter form instead
+SOURCES = ("ai", "manual", "catalog")
 CACHE_SECONDS = 60  # an approval reaches the agent within a minute
 COLUMNS = ("definition_id", "kind", "name", "tables", "definition", "status", "source", "external_id",
            "proposed_by", "updated_by", "created_at", "updated_at")
@@ -146,6 +150,102 @@ def list_definitions(env=os.environ):
     return _select(env)
 
 
+def _filters(query):
+    """Validated list filters -> (WHERE sql, params). Unknown or malformed values are rejected, never ignored."""
+    clauses, params = [], []
+    for key, allowed in (("status", STATUSES), ("kind", KINDS), ("source", SOURCES)):
+        value = query.get(key) or ""
+        if value:
+            if value not in allowed:
+                raise SettingsError("Filter tidak valid.")
+            clauses.append(f"{key} = %s")
+            params.append(value)
+    database, table, words = query.get("database") or "", query.get("table") or "", (query.get("q") or "").strip()
+    if database:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", database):
+            raise SettingsError("Filter tidak valid.")
+        clauses.append("EXISTS (SELECT 1 FROM unnest(tables) t WHERE split_part(t, '.', 1) = %s)")
+        params.append(database)
+    if table:
+        if not TABLE.fullmatch(table):
+            raise SettingsError("Filter tidak valid.")
+        clauses.append("tables @> ARRAY[%s]::text[]")
+        params.append(table)
+    if words:
+        if len(words) > 100:
+            raise SettingsError("Kata pencarian terlalu panjang.")
+        like = "%" + words.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        clauses.append("(name ILIKE %s OR array_to_string(tables, ' ') ILIKE %s OR definition::text ILIKE %s)")
+        params += [like, like, like]
+    return ("WHERE " + " AND ".join(clauses)) if clauses else "", params
+
+
+def _number(value, default):
+    if value in (None, ""):
+        return default
+    if not isinstance(value, str) or not value.isdigit() or len(value) > 6:
+        raise SettingsError("Pengaturan tabel tidak valid.")
+    return int(value)
+
+
+def page_definitions(query, env=os.environ):
+    """One page of definitions for the Admin Panel table, plus totals per status for the whole (unfiltered) layer."""
+    where, params = _filters(query)
+    size, page = _number(query.get("size"), 25), _number(query.get("page"), 1)
+    sort, direction = query.get("sort") or "updated_at", (query.get("dir") or "desc").lower()
+    if size not in PAGE_SIZES or not 1 <= page <= 100000 or sort not in SORTS or direction not in ("asc", "desc"):
+        raise SettingsError("Pengaturan tabel tidak valid.")
+    if not env.get("KAI_CATALOG_DSN"):
+        return {"definitions": [], "total": 0, "counts": {}, "storage_available": False}
+    with _connect(env) as connection:
+        total = connection.execute(f"SELECT count(*) FROM kai.semantic_definitions {where}", params).fetchone()[0]
+        rows = connection.execute(
+            f"SELECT {', '.join(COLUMNS)} FROM kai.semantic_definitions {where} "
+            f"ORDER BY {SORTS[sort]} {direction}, definition_id LIMIT %s OFFSET %s",
+            (*params, size, (page - 1) * size)).fetchall()
+        counts = dict(connection.execute("SELECT status, count(*) FROM kai.semantic_definitions GROUP BY status").fetchall())
+    return {"definitions": [_row(r) for r in rows], "total": total, "counts": counts, "storage_available": True}
+
+
+def covered_tables(env=os.environ, database=None):
+    """table ref -> {"metric": n, "verified_query": n, "draft": n, "approved": n, "rejected": n} (one aggregate)."""
+    if not env.get("KAI_CATALOG_DSN"):
+        return {}
+    sql = ("SELECT t, kind, status, count(*) FROM kai.semantic_definitions, unnest(tables) t "
+           + ("WHERE split_part(t, '.', 1) = %s " if database else "") + "GROUP BY 1, 2, 3")
+    result = {}
+    with _connect(env) as connection:
+        for ref, kind, status, n in connection.execute(sql, (database,) if database else ()).fetchall():
+            item = result.setdefault(ref, {"metric": 0, "verified_query": 0, "draft": 0, "approved": 0, "rejected": 0})
+            item[kind] += n
+            item[status] += n
+    return result
+
+
+def bulk_status(body, env=os.environ):
+    """Approve/reject many in one UPDATE: either explicit ids, or every definition matching a list filter."""
+    status, user = _status(body), _user(body)
+    if not env.get("KAI_CATALOG_DSN"):
+        raise SettingsError("Penyimpanan semantic layer belum disiapkan (KAI_CATALOG_DSN).")
+    ids, query = body.get("ids"), body.get("filter")
+    if ids is not None:
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= MAX_BULK
+                or not all(isinstance(i, str) and UUID.fullmatch(i) for i in ids)):
+            raise SettingsError("Pilihan tidak valid.")
+        where, params = "WHERE definition_id = ANY(%s::uuid[])", [ids]
+    elif isinstance(query, dict) and all(isinstance(v, str) for v in query.values()):
+        where, params = _filters(query)
+        if not where:
+            raise SettingsError("Pilih filter dulu; mengubah seluruh semantic layer sekaligus tidak diizinkan.")
+    else:
+        raise SettingsError("Pilihan tidak valid.")
+    with _connect(env) as connection:
+        changed = connection.execute(f"UPDATE kai.semantic_definitions SET status=%s, updated_by=%s, updated_at=now() "
+                                     f"{where} AND status <> %s", (status, user, *params, status)).rowcount
+    _approved["at"] = 0.0
+    return {"changed": changed}
+
+
 def _write(env, sql, params):
     if not env.get("KAI_CATALOG_DSN"):
         raise SettingsError("Penyimpanan semantic layer belum disiapkan (KAI_CATALOG_DSN).")
@@ -249,9 +349,8 @@ async def definitions_request(request):
     definition_id = (getattr(request, "path_params", None) or {}).get("definition_id")
     try:
         if request.method == "GET":
-            rows = await asyncio.to_thread(list_definitions)
-            return JSONResponse({"definitions": rows, "storage_available": bool(os.environ.get("KAI_CATALOG_DSN"))},
-                                headers={"Cache-Control": "no-store"})
+            result = await asyncio.to_thread(page_definitions, dict(request.query_params))
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
         body = await _body(request)
         if not isinstance(body, dict):
             raise SettingsError("Isian tidak valid.")
@@ -271,6 +370,21 @@ async def definitions_request(request):
         return JSONResponse({"message": "Semantic layer tidak bisa dibaca atau disimpan."}, status_code=503)
 
 
+async def bulk_request(request):
+    if not _authorized(request):
+        return JSONResponse({"message": "Unauthorized."}, status_code=401)
+    try:
+        body = await _body(request)
+        if not isinstance(body, dict):
+            raise SettingsError("Isian tidak valid.")
+        return JSONResponse(await asyncio.to_thread(bulk_status, body), headers={"Cache-Control": "no-store"})
+    except SettingsError as error:
+        return JSONResponse({"message": str(error)}, status_code=400)
+    except Exception:
+        return JSONResponse({"message": "Semantic layer tidak bisa disimpan."}, status_code=503)
+
+
 def register_semantic_routes(mcp):
+    mcp.custom_route("/v1/internal/semantic/bulk", methods=["POST"])(bulk_request)
     mcp.custom_route("/v1/internal/semantic", methods=["GET", "POST"])(definitions_request)
     mcp.custom_route("/v1/internal/semantic/{definition_id}", methods=["PUT", "DELETE"])(definitions_request)

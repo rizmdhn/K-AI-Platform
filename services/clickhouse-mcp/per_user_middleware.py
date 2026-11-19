@@ -32,6 +32,7 @@ from binding_credentials import get_managed_credentials
 from warehouse_enrollment import register_warehouse_routes
 from warehouse_readiness import register_readiness_routes
 from health_routes import register_health_routes
+import audit_store
 from problems import register_problem_routes
 import integration_settings
 from integration_settings import register_integration_routes
@@ -77,6 +78,8 @@ def attach_audit_file(directory):
 
 if os.getenv("KAI_AUDIT_LOG_DIR"):
     attach_audit_file(os.environ["KAI_AUDIT_LOG_DIR"])
+if os.getenv("KAI_CATALOG_DSN"):
+    audit_store.attach(audit, os.environ["KAI_CATALOG_DSN"], _retention_days)  # query copy for the Admin Panel log
 SQL_FIELDS = {"run_query": "query", "execute_readonly_sql": "sql", "search_rows_by_meaning": "sql"}
 # Tools that also carry SQL (policy check + audit hash) but return no query rows, so no result limiting.
 CHECKED_SQL_FIELDS = {**SQL_FIELDS, "start_row_labeling": "sql"}

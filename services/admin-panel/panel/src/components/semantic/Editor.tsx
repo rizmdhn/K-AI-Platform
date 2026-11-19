@@ -122,16 +122,3 @@ export function Editor({ row, canManage, onDone }: { row: SemanticDefinition | n
 }
 /** "kai_demo.penjualan" -> "kai_demo". */
 export const databaseOf = (table: string) => table.split('.', 1)[0];
-/** Approve or reject several definitions, one request each (the MCP re-validates every one). */
-export async function setStatus(rows: SemanticDefinition[], status: SemanticStatus, onStep: (done: number) => void) {
-  const failed: string[] = [];
-  for (let i = 0; i < rows.length; i++) {
-    try {
-      await updateSemanticFn({ data: { id: rows[i].definition_id, form: { ...toForm(rows[i]), status } } });
-    } catch (cause) {
-      failed.push(`${rows[i].name}: ${errorText(cause, 'gagal')}`);
-    }
-    onStep(i + 1);
-  }
-  return failed;
-}

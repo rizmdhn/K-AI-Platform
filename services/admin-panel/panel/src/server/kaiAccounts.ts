@@ -89,7 +89,7 @@ const usageDays = z.union([z.literal(1), z.literal(7), z.literal(30), z.literal(
 export const usageFn = createServerFn({ method: 'GET' }).inputValidator(z.object({ days: usageDays }).strict())
   .handler(async ({ data }): Promise<UsageSummary> => call(`/api/admin/users/kai-usage?days=${data.days}`, SystemCapabilities.READ_USERS));
 
-// Data access log from the MCP audit: who called which data tool and the outcome. Never SQL text or result values.
+// Data access log from the MCP audit table, 100 rows per page (cursor = opaque token for the next, older page): who called which data tool and the outcome. Never SQL text or result values.
 export type AuditOutcome = 'ok' | 'cancelled' | 'error' | 'auth_failed' | 'login_rejected' | 'access_denied' | 'unsafe_sql' | 'query_limit' | 'no_credentials';
 export type AuditDays = 1 | 7 | 30 | 90;
 export interface AuditRow {
@@ -97,13 +97,13 @@ export interface AuditRow {
   database: string | null; outcome: AuditOutcome; error_code: string | null; rows: number | null; truncated: boolean | null; duration_ms: number | null;
 }
 export interface AuditLog {
-  days: AuditDays; available: boolean; partial: boolean; total: number; counts: Partial<Record<AuditOutcome, number>>; tools: string[];
+  days: AuditDays; available: boolean; next_cursor: string | null; total: number; counts: Partial<Record<AuditOutcome, number>>; tools: string[];
   users: { id: string; name: string | null; email: string | null }[]; rows: AuditRow[];
 }
 export interface AuditFilter { days: AuditDays; user?: string; outcome?: AuditOutcome; tool?: string }
 const auditOutcome = z.enum(['ok', 'cancelled', 'error', 'auth_failed', 'login_rejected', 'access_denied', 'unsafe_sql', 'query_limit', 'no_credentials']);
 export const auditLogFn = createServerFn({ method: 'GET' })
-  .inputValidator(z.object({ days: usageDays, user: id.optional(), outcome: auditOutcome.optional(), tool: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/).optional() }).strict())
+  .inputValidator(z.object({ days: usageDays, user: id.optional(), outcome: auditOutcome.optional(), tool: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/).optional(), cursor: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/).optional() }).strict())
   .handler(async ({ data }): Promise<AuditLog> => {
     const query = new URLSearchParams(Object.entries(data).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]));
     return call(`/api/admin/users/kai-audit?${query}`, SystemCapabilities.READ_USERS);
@@ -168,8 +168,45 @@ const semanticForm = z.object({
 }).strict();
 export type SemanticForm = z.infer<typeof semanticForm>;
 const definitionId = z.string().uuid();
-export const semanticListFn = createServerFn({ method: 'GET' })
-  .handler(async (): Promise<{ definitions: SemanticDefinition[]; storage_available: boolean }> => call('/api/admin/users/kai-semantic', SystemCapabilities.READ_CONFIGS));
+// Tables are paged on the server: page/size/sort travel with the filters; totals cover every match.
+export const PAGE_SIZES = [10, 25, 50, 100] as const;
+export type PageSize = (typeof PAGE_SIZES)[number];
+export interface SemanticQuery {
+  status?: SemanticStatus; kind?: SemanticKind; source?: 'ai' | 'manual' | 'catalog'; database?: string; table?: string; q?: string;
+  sort?: 'name' | 'updated_at' | 'kind' | 'status' | 'table'; dir?: 'asc' | 'desc'; page?: number; size?: PageSize;
+}
+export interface SemanticPage { definitions: SemanticDefinition[]; total: number; counts: Partial<Record<SemanticStatus, number>>; storage_available: boolean }
+const pageSize = z.union([z.literal(10), z.literal(25), z.literal(50), z.literal(100)]);
+const ref = z.string().regex(/^[A-Za-z0-9_-]{1,128}(\.[A-Za-z0-9_-]{1,128})?$/);
+const semanticFilter = z.object({
+  status: z.enum(['draft', 'approved', 'rejected']).optional(), kind: z.enum(['metric', 'verified_query']).optional(),
+  source: z.enum(['ai', 'manual', 'catalog']).optional(), database: ref.optional(), table: ref.optional(), q: z.string().max(100).optional(),
+}).strict();
+const semanticQuery = semanticFilter.extend({
+  sort: z.enum(['name', 'updated_at', 'kind', 'status', 'table']).optional(), dir: z.enum(['asc', 'desc']).optional(),
+  page: z.number().int().min(1).max(100000).optional(), size: pageSize.optional(),
+}).strict();
+const search = (data: object) => new URLSearchParams(Object.entries(data).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString();
+export const semanticListFn = createServerFn({ method: 'GET' }).inputValidator(semanticQuery)
+  .handler(async ({ data }): Promise<SemanticPage> => call(`/api/admin/users/kai-semantic?${search(data)}`, SystemCapabilities.READ_CONFIGS));
+/** Approve/reject in one request: the ids on screen, or every definition matching the current filter. */
+export const bulkSemanticFn = createServerFn({ method: 'POST' })
+  .inputValidator(z.union([
+    z.object({ status: z.enum(['approved', 'rejected', 'draft']), ids: z.array(z.string().uuid()).min(1).max(1000) }).strict(),
+    z.object({ status: z.enum(['approved', 'rejected', 'draft']), filter: semanticFilter }).strict(),
+  ]))
+  .handler(async ({ data }): Promise<{ changed: number }> => call('/api/admin/users/kai-semantic/bulk', SystemCapabilities.MANAGE_CONFIGS, 'POST', data));
+export type TableStatus = 'none' | 'draft' | 'partial' | 'approved' | 'rejected';
+export interface SemanticTable { name: string; ref: string; comment: string; rows: number | null; metrics: number; queries: number; drafts: number; approved: number; rejected: number; status: TableStatus }
+export interface SemanticTableQuery { database: string; status?: TableStatus; q?: string; sort?: 'name' | 'metrics' | 'queries' | 'drafts' | 'status' | 'rows'; dir?: 'asc' | 'desc'; page?: number; size?: PageSize }
+export interface SemanticTablePage { database: string; tables: SemanticTable[]; total: number; counts: Record<TableStatus, number> }
+export const semanticTablesFn = createServerFn({ method: 'GET' })
+  .inputValidator(z.object({
+    database: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), status: z.enum(['none', 'draft', 'partial', 'approved', 'rejected']).optional(),
+    q: z.string().max(100).optional(), sort: z.enum(['name', 'metrics', 'queries', 'drafts', 'status', 'rows']).optional(),
+    dir: z.enum(['asc', 'desc']).optional(), page: z.number().int().min(1).max(100000).optional(), size: pageSize.optional(),
+  }).strict())
+  .handler(async ({ data }): Promise<SemanticTablePage> => call(`/api/admin/users/kai-semantic/tables?${search(data)}`, SystemCapabilities.MANAGE_CONFIGS));
 export const createSemanticFn = createServerFn({ method: 'POST' }).inputValidator(semanticForm)
   .handler(async ({ data }): Promise<SemanticDefinition> => call('/api/admin/users/kai-semantic', SystemCapabilities.MANAGE_CONFIGS, 'POST', data));
 export const updateSemanticFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ id: definitionId, form: semanticForm }).strict())
@@ -179,17 +216,22 @@ export const deleteSemanticFn = createServerFn({ method: 'POST' }).inputValidato
 
 // AI draft job (local model on the server). Status is readable with read:configs; start/stop need manage:configs.
 export type DraftModelStatus = 'ready' | 'no_model' | 'loading' | 'failed' | 'unavailable' | 'not_configured';
+export type QueueStatus = 'waiting' | 'running' | 'done' | 'failed' | 'cancelled';
+export interface SemanticQueueEntry {
+  database: string; status: QueueStatus; tables_total: number | null; tables_existing: number | null; tables_todo: number; tables_wide: number;
+  tables_done: number; drafts_saved: number; drafts_skipped: number; message: string | null;
+}
 export interface SemanticJob {
-  id: string; status: 'running' | 'done' | 'failed' | 'cancelled'; database: string; started_by: string; started_at: string; finished_at: string | null;
-  phase: string | null; current: string[]; tables_total: number; tables_existing: number; tables_wide: number; tables_done: number;
-  groups_total: number; groups_done: number; drafts_saved: number; drafts_skipped: number; issues: { item: string; reason: string }[];
-  seconds_per_group: number | null; eta_seconds: number | null; message: string | null; model: string;
+  id: string; status: 'running' | 'done' | 'failed' | 'cancelled'; started_by: string; started_at: string; finished_at: string | null;
+  phase: string | null; current: string[]; current_database: string | null; group_started_at: string | null; queue: SemanticQueueEntry[];
+  tables_total: number; tables_done: number; drafts_saved: number; drafts_skipped: number; issues: { item: string; reason: string }[];
+  seconds_per_table: number | null; eta_seconds: number | null; message: string | null; model: string;
 }
 export interface SemanticDraftState { job: SemanticJob | null; model: { status: DraftModelStatus; name: string } }
 export interface SemanticDatabase { name: string; tables: number; covered: number }
 export const semanticDraftsFn = createServerFn({ method: 'GET' })
   .handler(async (): Promise<SemanticDraftState> => call('/api/admin/users/kai-semantic/drafts', SystemCapabilities.READ_CONFIGS));
-export const startSemanticDraftsFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ database: z.string().min(1).max(128) }).strict())
+export const startSemanticDraftsFn = createServerFn({ method: 'POST' }).inputValidator(z.object({ databases: z.array(z.string().min(1).max(128)).min(1).max(20) }).strict())
   .handler(async ({ data }): Promise<SemanticDraftState> => call('/api/admin/users/kai-semantic/drafts', SystemCapabilities.MANAGE_CONFIGS, 'POST', data));
 export const stopSemanticDraftsFn = createServerFn({ method: 'POST' })
   .handler(async (): Promise<SemanticDraftState> => call('/api/admin/users/kai-semantic/drafts', SystemCapabilities.MANAGE_CONFIGS, 'DELETE', {}));

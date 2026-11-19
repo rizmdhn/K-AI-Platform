@@ -86,4 +86,12 @@ SELECT NOT EXISTS (
     \ir migrations/012_semantic_definitions.sql
     INSERT INTO kai.schema_migrations (version) VALUES ('012_semantic_definitions');
 \endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM kai.schema_migrations WHERE version = '013_audit_events'
+) AS apply_audit_events \gset
+\if :apply_audit_events
+    \ir migrations/013_audit_events.sql
+    INSERT INTO kai.schema_migrations (version) VALUES ('013_audit_events');
+\endif
 COMMIT;

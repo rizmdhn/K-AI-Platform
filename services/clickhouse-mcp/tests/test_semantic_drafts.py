@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 import unittest
 from unittest import mock
 
@@ -28,7 +29,8 @@ REPLY = drafts.Drafts(
 
 
 class DraftJobTests(unittest.IsolatedAsyncioTestCase):
-    async def run_job(self, reply=REPLY, covered=(), credentials=("budi_demo", "pw"), explain=None):
+    async def run_job(self, reply=REPLY, covered=(), credentials=("budi_demo", "pw"), explain=None, databases=("kai_demo",)):
+        databases = list(databases)
         saved, explained, audits = [], [], []
 
         async def creds(_):
@@ -41,6 +43,8 @@ class DraftJobTests(unittest.IsolatedAsyncioTestCase):
             return reply
 
         def query(_overrides, sql, params=None):
+            if sql.startswith("SELECT database, count()"):
+                return [{"database": d, "n": len(TABLES)} for d in params["dbs"]]
             explained.append(sql)
             if explain:
                 raise explain
@@ -52,14 +56,14 @@ class DraftJobTests(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(drafts, "_catalog", lambda overrides, database: TABLES),
             mock.patch.object(drafts, "_ask_model", ask),
             mock.patch.object(drafts, "_query", query),
-            mock.patch.object(semantic, "list_definitions", lambda: [{"tables": list(covered)}] if covered else []),
+            mock.patch.object(semantic, "covered_tables", lambda env=None, database=None: {ref: {} for ref in covered}),
             mock.patch.object(semantic, "save_draft", lambda cleaned, admin: saved.append((cleaned[1], admin))),
             mock.patch.object(drafts.audit, "info", audits.append),
         ]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
-        drafts.start("kai_demo", "a" * 24)
+        drafts.start(databases, "a" * 24)
         await drafts._task
         return drafts._public(), saved, explained, [json.loads(a) for a in audits]
 
@@ -76,7 +80,7 @@ class DraftJobTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tables_with_a_definition_are_skipped_and_clickhouse_rejection_is_reported(self):
         job, saved, _, _ = await self.run_job(covered=("kai_demo.tiket",), explain=RuntimeError("Query execution failed: Unknown function"))
-        self.assertEqual((job["tables_existing"], job["groups_total"], saved), (1, 1, []))
+        self.assertEqual((job["queue"][0]["tables_existing"], job["tables_total"], saved), (1, 1, []))
         self.assertTrue(any("ClickHouse menolak SQL: Unknown function" == i["reason"] for i in job["issues"]))
 
     async def test_admin_without_clickhouse_access_gets_a_clear_failure(self):
@@ -95,16 +99,69 @@ class DraftJobTests(unittest.IsolatedAsyncioTestCase):
              mock.patch.object(drafts, "get_managed_credentials", mock.AsyncMock(return_value=("u", "p"))), \
              mock.patch.object(drafts, "_overrides", lambda u, p: {}), \
              mock.patch.object(drafts, "_catalog", lambda o, d: TABLES), \
-             mock.patch.object(semantic, "list_definitions", lambda: []), \
+             mock.patch.object(drafts, "_query", lambda o, sql, params=None: [{"database": "kai_demo", "n": 2}]), \
+             mock.patch.object(semantic, "covered_tables", lambda env=None, database=None: {}), \
              mock.patch.object(drafts.audit, "info", lambda line: None):
-            drafts.start("kai_demo", "a" * 24)
+            drafts.start(["kai_demo", "kai_lain"], "a" * 24)
             await asyncio.sleep(0)
             with self.assertRaises(drafts.SettingsError):
-                drafts.start("kai_demo", "a" * 24)
+                drafts.start(["kai_demo"], "a" * 24)
             drafts._cancel.set()
             gate.set()
             await drafts._task
-        self.assertEqual(drafts._public()["status"], "cancelled")
+        job = drafts._public()
+        self.assertEqual(job["status"], "cancelled")
+        self.assertEqual([e["status"] for e in job["queue"]], ["cancelled", "cancelled"])  # nothing left half-marked running
+
+    async def test_queue_runs_databases_in_order_with_per_table_speed_and_eta(self):
+        job, saved, _, audits = await self.run_job(databases=("kai_demo", "kai_dua"))
+        self.assertEqual([e["status"] for e in job["queue"]], ["done", "done"])
+        self.assertEqual((job["tables_total"], job["tables_done"]), (4, 4))
+        self.assertIsNotNone(job["seconds_per_table"])
+        self.assertIsNone(job["eta_seconds"])  # finished: no ETA
+        self.assertEqual(audits[0]["database"], "kai_demo,kai_dua")
+
+    def test_eta_counts_down_remaining_tables_minus_the_running_group(self):
+        drafts._job.clear()
+        self.addCleanup(drafts._job.clear)
+        drafts._job.update(status="running", queue=[], tables_total=10, tables_done=4, seconds_per_table=60.0, model_seconds=240.0,
+                           group_started_at=(datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat())
+        eta = drafts._public()["eta_seconds"]
+        self.assertTrue(325 <= eta <= 330, eta)  # 6 tables x 60 s, minus ~30 s already spent
+
+    def test_queue_input_is_validated(self):
+        for body in ({"databases": []}, {"databases": ["a"] * 2}, {"databases": ["system"]}, {"databases": ["x;y"]},
+                     {"databases": [f"d{i}" for i in range(21)]}, {}):
+            with self.assertRaises(drafts.SettingsError):
+                drafts._databases(body)
+        self.assertEqual(drafts._databases({"databases": ["a", "b"]}), ["a", "b"])
+
+
+class TablePageTests(unittest.TestCase):
+    TABLES = [{"name": n, "ref": f"db.{n}", "comment": c, "total_rows": r} for n, c, r in
+              (("penjualan", "transaksi", 900), ("cabang", "", 4), ("tiket", "keluhan", 50), ("lama", "", 1))]
+    COVERED = {"db.penjualan": {"metric": 2, "verified_query": 1, "draft": 1, "approved": 2, "rejected": 0},
+               "db.cabang": {"metric": 1, "verified_query": 0, "draft": 0, "approved": 1, "rejected": 0},
+               "db.lama": {"metric": 1, "verified_query": 0, "draft": 0, "approved": 0, "rejected": 1}}
+
+    def page(self, **query):
+        return drafts.table_page(self.TABLES, self.COVERED, {k: str(v) for k, v in query.items()})
+
+    def test_status_counts_filters_sort_and_pages(self):
+        result = self.page()
+        self.assertEqual(result["counts"], {"none": 1, "draft": 0, "partial": 1, "approved": 1, "rejected": 1})
+        self.assertEqual([r["status"] for r in result["tables"]], ["approved", "rejected", "partial", "none"])  # by name
+        self.assertEqual([r["name"] for r in self.page(status="none")["tables"]], ["tiket"])
+        self.assertEqual([r["name"] for r in self.page(q="KELUHAN")["tables"]], ["tiket"])
+        self.assertEqual([r["name"] for r in self.page(sort="rows", dir="desc")["tables"]][0], "penjualan")
+        second = self.page(size=10, page=1)
+        self.assertEqual((second["total"], len(second["tables"])), (4, 4))
+        self.assertEqual(self.page(size=10, page=2)["tables"], [])
+
+    def test_bad_table_settings_are_refused(self):
+        for query in ({"size": 7}, {"page": 0}, {"sort": "drop"}, {"dir": "up"}, {"status": "x"}, {"size": "1e3"}):
+            with self.assertRaises(drafts.SettingsError):
+                self.page(**query)
 
 
 class ModelContractTests(unittest.TestCase):
@@ -120,7 +177,7 @@ class ModelContractTests(unittest.TestCase):
 class RouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_start_is_refused_with_a_clear_message_when_the_model_is_down(self):
         request = mock.Mock(method="POST", headers={"authorization": "Bearer secret"})
-        request.body = mock.AsyncMock(return_value=json.dumps({"database": "kai_demo", "updated_by": "a" * 24}).encode())
+        request.body = mock.AsyncMock(return_value=json.dumps({"databases": ["kai_demo"], "updated_by": "a" * 24}).encode())
         with mock.patch.dict("os.environ", {"KAI_PLATFORM_INTERNAL_TOKEN": "secret"}), \
              mock.patch.object(drafts, "model_status", mock.AsyncMock(return_value="unavailable")), \
              mock.patch.object(drafts, "start") as start:

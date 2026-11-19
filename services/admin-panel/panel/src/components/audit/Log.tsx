@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Button } from '@clickhouse/click-ui';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import type { AuditDays, AuditFilter, AuditOutcome, AuditRow } from '@/server/kaiAccounts';
@@ -54,9 +55,15 @@ function Row({ row }: { row: AuditRow }) {
 }
 /** Data access log: every data tool call by K-AI Analis Data, filterable by user, outcome, tool and period. */
 export function AuditLogPage({ filter, onFilter }: { filter: AuditFilter; onFilter: (next: AuditFilter) => void }) {
-  const query = useQuery({ queryKey: ['kaiAudit', filter], queryFn: () => auditLogFn({ data: filter }), retry: false, placeholderData: keepPreviousData });
+  /** Cursors of the pages above the current one; empty = newest page. Reset whenever the filter changes. */
+  const [pages, setPages] = useState<{ key: string; stack: string[] }>({ key: '', stack: [] });
+  const key = JSON.stringify(filter);
+  const stack = pages.key === key ? pages.stack : [];
+  const cursor = stack[stack.length - 1];
+  const query = useQuery({ queryKey: ['kaiAudit', filter, cursor ?? ''], queryFn: () => auditLogFn({ data: { ...filter, ...(cursor ? { cursor } : {}) } }), retry: false, placeholderData: keepPreviousData });
   const data = query.data;
   const set = (patch: Partial<AuditFilter>) => onFilter({ ...filter, ...patch });
+  const page = stack.length + 1;
   const filtered = !!(filter.user || filter.outcome || filter.tool);
   return <div className="flex flex-col gap-4 p-4 md:p-6">
     <header className="flex flex-col gap-1">
@@ -84,7 +91,6 @@ export function AuditLogPage({ filter, onFilter }: { filter: AuditFilter; onFilt
     </div>
     {query.isError && <Notice tone="error">{query.error instanceof Error ? query.error.message : 'Log akses data gagal dimuat.'}</Notice>}
     {data && !data.available && <Notice tone="warning">Log audit tidak terbaca dari layanan akses data (MCP). Periksa layanan clickhouse-mcp di server.</Notice>}
-    {data?.partial && <Notice tone="info">Log periode ini terlalu besar, jadi hanya bagian terbaru yang terbaca. Persempit periode untuk melihat semuanya.</Notice>}
     {data?.available && <div className={`flex flex-col gap-4 transition-opacity ${query.isPlaceholderData ? 'opacity-60' : ''}`}>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">{TILES.map(t => {
         const active = t.outcome ? filter.outcome === t.outcome : !filter.outcome;
@@ -104,7 +110,12 @@ export function AuditLogPage({ filter, onFilter }: { filter: AuditFilter; onFilt
           </tr></thead>
           <tbody>{data.rows.map(row => <Row key={`${row.ts}-${row.request_id ?? ''}-${row.tool ?? ''}`} row={row} />)}</tbody>
         </table></div>}
-      {data.total > data.rows.length && <p className="text-xs text-(--cui-color-text-muted)">Menampilkan {whole.format(data.rows.length)} kejadian terbaru dari {whole.format(data.total)}. Gunakan filter untuk mempersempit.</p>}
+      {(page > 1 || data.next_cursor) && <nav aria-label="Halaman log" className="flex flex-wrap items-center gap-2 text-sm">
+        <Button type="secondary" label="Terbaru" disabled={page === 1 || query.isFetching} onClick={() => setPages({ key, stack: [] })} />
+        <Button type="secondary" label="Sebelumnya" disabled={page === 1 || query.isFetching} onClick={() => setPages({ key, stack: stack.slice(0, -1) })} />
+        <span className="text-(--cui-color-text-muted)">Halaman {whole.format(page)} dari ±{whole.format(Math.max(1, Math.ceil(data.total / 100)))}</span>
+        <Button type="secondary" label="Berikutnya" disabled={!data.next_cursor || query.isFetching} onClick={() => data.next_cursor && setPages({ key, stack: [...stack, data.next_cursor] })} />
+      </nav>}
       <p className="text-xs text-(--cui-color-text-muted)">Sumber: log audit layanan akses data, disimpan sesuai Integrasi → Batas query dan log. ID dipakai untuk menelusuri kejadian di server.</p>
     </div>}
   </div>;
