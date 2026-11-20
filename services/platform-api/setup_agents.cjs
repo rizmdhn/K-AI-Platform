@@ -20,7 +20,7 @@ function parseArgs(args) {
 const summarize = agent => ({ id: agent.id, name: agent.name, provider: agent.provider, model: agent.model, tools: agent.tools ?? [] });
 function createAdapter({ db, mongoose, permissions, capabilities, configService, api, native, nanoid, brand, beforeWrite }) {
   const { ResourceType, PrincipalType, AccessRoleIds, Constants } = native;
-  const chTools = ['list_databases', 'list_tables', 'run_query', 'get_table_schema', 'execute_readonly_sql', 'search_database_metadata', 'search_rows_by_meaning', 'suggest_comment_sql', 'start_row_labeling', 'get_row_labeling_job'].map(name => `${name}${Constants.mcp_delimiter}clickhouse`);
+  const chTools = ['list_databases', 'list_tables', 'run_query', 'get_table_schema', 'execute_readonly_sql', 'search_database_metadata', 'search_rows_by_meaning', 'suggest_comment_sql', 'start_row_labeling', 'get_row_labeling_job', 'create_document'].map(name => `${name}${Constants.mcp_delimiter}clickhouse`);
   const getConfig = actor => configService.getAppConfig({ tenantId: actor.tenantId, failClosed: true, skipRuntimeAugmentation: true });
   const handlers = api.createAdminConfigHandlers({
     ...Object.fromEntries(['listAllConfigs', 'findConfigByPrincipal', 'upsertConfig', 'patchConfigFields', 'tombstoneConfigField', 'unsetConfigField', 'deleteConfig', 'toggleConfigActive'].map(key => [key, db[key]])),

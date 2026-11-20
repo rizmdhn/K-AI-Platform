@@ -7,7 +7,7 @@ function fixture(){
  return {state,deps};
 }
 async function setup(f){assert.ok(fs.existsSync(modulePath),'native managed setup helper exists');return require(modulePath).provisionManagedAgents('a'.repeat(24),f.deps);}
-test('creates two scoped agents and preserves unrelated model specs, repeat is idempotent',async()=>{const f=fixture();const result=await setup(f);assert.deepEqual(result.general.tools,['file_search']);assert.ok(!result.warehouse.tools.includes('file_search'));assert.equal(result.warehouse.tools.length,10);assert.ok(result.warehouse.tools.includes('start_row_labeling_mcp_clickhouse'));assert.ok(result.warehouse.tools.includes('suggest_comment_sql_mcp_clickhouse'));assert.ok(result.warehouse.tools.includes('search_rows_by_meaning_mcp_clickhouse'));assert.ok(result.warehouse.tools.includes('search_database_metadata_mcp_clickhouse'));assert.ok(result.warehouse.tools.every(k=>k.endsWith('_mcp_clickhouse')));assert.equal(f.state.config.modelSpecs.list[0].preset.endpoint,'agents');assert.equal(f.state.config.modelSpecs.list.find(s=>s.name==='other').preset.model,'other');const count=f.state.writes.length;await setup(f);assert.equal(f.state.writes.length,count);});
+test('creates two scoped agents and preserves unrelated model specs, repeat is idempotent',async()=>{const f=fixture();const result=await setup(f);assert.deepEqual(result.general.tools,['file_search']);assert.ok(!result.warehouse.tools.includes('file_search'));assert.equal(result.warehouse.tools.length,11);assert.ok(result.warehouse.tools.includes('start_row_labeling_mcp_clickhouse'));assert.ok(result.warehouse.tools.includes('suggest_comment_sql_mcp_clickhouse'));assert.ok(result.warehouse.tools.includes('search_rows_by_meaning_mcp_clickhouse'));assert.ok(result.warehouse.tools.includes('search_database_metadata_mcp_clickhouse'));assert.ok(result.warehouse.tools.every(k=>k.endsWith('_mcp_clickhouse')));assert.equal(f.state.config.modelSpecs.list[0].preset.endpoint,'agents');assert.equal(f.state.config.modelSpecs.list.find(s=>s.name==='other').preset.model,'other');const count=f.state.writes.length;await setup(f);assert.equal(f.state.writes.length,count);});
 test('fresh ADMIN capability and active status are mandatory before writing',async()=>{for(const change of [{role:'USER'},{role:'ADMIN',kaiAccount:{status:'pending'}}]){const f=fixture();f.state.actor={...f.state.actor,...change};await assert.rejects(setup(f),e=>e.status===403);assert.equal(f.state.writes.length,0);}const f=fixture();f.state.caps=false;await assert.rejects(setup(f),e=>e.status===403);assert.equal(f.state.writes.length,0);});
 test('foreign owner or unsafe tools in an existing candidate are rejected',async()=>{const f=fixture();f.state.agents.push({id:'agent_'+ 'z'.repeat(21),_id:'db',name:'K-AI platform - Umum',author:'foreign',provider:'Ollama Cloud',model:'approved',tools:['run_query_mcp_clickhouse']});await assert.rejects(setup(f),e=>e.status===409);assert.equal(f.state.writes.length,0);});
 test('ambiguous candidates never silently acquire access',async()=>{const f=fixture();f.state.agents=[{name:'K-AI platform - Umum'},{name:'K-AI platform - Umum'}];await assert.rejects(setup(f),e=>e.status===409);assert.equal(f.state.writes.length,0);});
@@ -39,7 +39,7 @@ test('guardrail instructions: General points to CH, CH points back to General, s
 test('a CH agent from before P4-08 (five tools) gains search_database_metadata in place, once',async()=>{
  const f=fixture();const old=['list_databases','list_tables','run_query','get_table_schema','execute_readonly_sql'].map(n=>n+'_mcp_clickhouse');
  f.state.agents.push({id:'agent_'+'c'.repeat(21),_id:'ch',name:'K-AI platform - CH',author:'a'.repeat(24),provider:'Ollama Cloud',model:'approved',tools:[...old]});
- const {warehouse}=await setup(f);assert.equal(warehouse.id,'agent_'+'c'.repeat(21));assert.equal(warehouse.tools.length,10);
+ const {warehouse}=await setup(f);assert.equal(warehouse.id,'agent_'+'c'.repeat(21));assert.equal(warehouse.tools.length,11);
  assert.equal(f.state.writes.filter(w=>w==='tools').length,1);const count=f.state.writes.length;await setup(f);assert.equal(f.state.writes.length,count);
 });
 test('a CH agent with any other tool set is still rejected',async()=>{
@@ -49,7 +49,7 @@ test('a CH agent with any other tool set is still rejected',async()=>{
 test('a CH agent from the P4-08 release (six tools) gains search_rows_by_meaning in place',async()=>{
  const f=fixture();const six=['list_databases','list_tables','run_query','get_table_schema','execute_readonly_sql','search_database_metadata'].map(n=>n+'_mcp_clickhouse');
  f.state.agents.push({id:'agent_'+'d'.repeat(21),_id:'ch6',name:'K-AI platform - CH',author:'a'.repeat(24),provider:'Ollama Cloud',model:'approved',tools:[...six]});
- const {warehouse}=await setup(f);assert.equal(warehouse.id,'agent_'+'d'.repeat(21));assert.equal(warehouse.tools.length,10);
+ const {warehouse}=await setup(f);assert.equal(warehouse.id,'agent_'+'d'.repeat(21));assert.equal(warehouse.tools.length,11);
 });
 test('inference switch (e.g. Gemini on Vertex) moves both agents in place: Flash for General, Pro for CH',async()=>{
  const f=fixture();await setup(f);const ids=f.state.agents.map(a=>a.id);
@@ -72,7 +72,7 @@ test('the CH model defaults to the General model when no CH model is named',asyn
 test('a CH agent from the AF-03 release (seven tools) gains suggest_comment_sql in place',async()=>{
  const f=fixture();const seven=['list_databases','list_tables','run_query','get_table_schema','execute_readonly_sql','search_database_metadata','search_rows_by_meaning'].map(n=>n+'_mcp_clickhouse');
  f.state.agents.push({id:'agent_'+'e'.repeat(21),_id:'ch7',name:'K-AI platform - CH',author:'a'.repeat(24),provider:'Ollama Cloud',model:'approved',tools:[...seven]});
- const {warehouse}=await setup(f);assert.equal(warehouse.id,'agent_'+'e'.repeat(21));assert.equal(warehouse.tools.length,10);
+ const {warehouse}=await setup(f);assert.equal(warehouse.id,'agent_'+'e'.repeat(21));assert.equal(warehouse.tools.length,11);
 });
 test('agents carry the new names, Indonesian landing text, four starters and a team contact (no admin name)',async()=>{
  const f=fixture();const {general,warehouse}=await setup(f);
@@ -91,12 +91,12 @@ test('agents named by an earlier release are found by the old name and renamed i
 test('a CH agent from the P4-04 release (eight tools) gains the two labelling tools in place',async()=>{
  const f=fixture();const eight=['list_databases','list_tables','run_query','get_table_schema','execute_readonly_sql','search_database_metadata','search_rows_by_meaning','suggest_comment_sql'].map(n=>n+'_mcp_clickhouse');
  f.state.agents.push({id:'agent_'+'h'.repeat(21),_id:'ch8',name:'K-AI platform - CH',author:'a'.repeat(24),provider:'Ollama Cloud',model:'approved',tools:[...eight]});
- const {warehouse}=await setup(f);assert.equal(warehouse.id,'agent_'+'h'.repeat(21));assert.equal(warehouse.tools.length,10);
+ const {warehouse}=await setup(f);assert.equal(warehouse.id,'agent_'+'h'.repeat(21));assert.equal(warehouse.tools.length,11);
 });
 test('a CH agent that briefly had the chat drafting tool (eleven tools) drops it in place',async()=>{
  const f=fixture();const eleven=['list_databases','list_tables','run_query','get_table_schema','execute_readonly_sql','search_database_metadata','search_rows_by_meaning','suggest_comment_sql','start_row_labeling','get_row_labeling_job','propose_semantic_definition'].map(n=>n+'_mcp_clickhouse');
  f.state.agents.push({id:'agent_'+'k'.repeat(21),_id:'ch11',name:'K-AI platform - CH',author:'a'.repeat(24),provider:'Ollama Cloud',model:'approved',tools:[...eleven]});
- const {warehouse}=await setup(f);assert.equal(warehouse.id,'agent_'+'k'.repeat(21));assert.ok(!warehouse.tools.includes('propose_semantic_definition_mcp_clickhouse'));assert.equal(warehouse.tools.length,10);
+ const {warehouse}=await setup(f);assert.equal(warehouse.id,'agent_'+'k'.repeat(21));assert.ok(!warehouse.tools.includes('propose_semantic_definition_mcp_clickhouse'));assert.equal(warehouse.tools.length,11);
 });
 test('an Admin Panel model list overrides a .env model it does not list; a listed .env model is kept',async()=>{
  const f=fixture();f.state.config.endpoints={custom:[{name:'Ollama Cloud',models:{default:['admin-model']}}]};

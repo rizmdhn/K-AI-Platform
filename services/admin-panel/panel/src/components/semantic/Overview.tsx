@@ -63,9 +63,43 @@ function TableDetail({ table, onClose }: { table: SemanticTable; onClose: () => 
     {total > rows.length && <p className="text-xs text-(--cui-color-text-muted)">Menampilkan {rows.length} dari {whole.format(total)}. Lihat semuanya di tab Semua definisi.</p>}
   </aside>;
 }
-/** Per-database coverage: every table the admin's ClickHouse account can read, paged on the server. */
-function Coverage({ databases }: { databases: SemanticDatabase[] }) {
-  const [database, setDatabase] = useState(databases[0]?.name ?? '');
+/** Coverage per database as a compact table that scrolls in its own box; a click picks the database below. */
+function Databases({ databases, active, onPick }: { databases: SemanticDatabase[]; active: string | null; onPick?: (name: string) => void }) {
+  const [sort, setSort] = useState<'name' | 'pct'>('pct');
+  const pct = (d: SemanticDatabase) => d.covered / Math.max(d.tables, 1);
+  const rows = [...databases].sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name) : pct(a) - pct(b) || b.tables - a.tables));
+  return <section className="flex flex-col gap-2" aria-label="Cakupan per database">
+    <div className="flex flex-wrap items-end justify-between gap-2">
+      <h2 className="text-sm font-medium">Cakupan per database <span className="font-normal text-(--cui-color-text-muted)">({whole.format(databases.length)})</span></h2>
+      <label className="flex items-center gap-2 text-sm text-(--cui-color-text-muted)">Urutkan
+        <Select value={sort} onChange={e => setSort(e.target.value as 'name' | 'pct')}>
+          <option value="pct">Cakupan terendah</option><option value="name">Nama</option></Select>
+      </label>
+    </div>
+    <div className="max-h-72 overflow-auto rounded-md border border-(--cui-color-stroke-default)">
+      <table className="w-full text-left text-sm">
+        <caption className="sr-only">Cakupan definisi per database</caption>
+        <thead className="sticky top-0 z-10 bg-(--cui-color-background-muted) text-xs text-(--cui-color-text-muted)"><tr>
+          <th scope="col" className="px-3 py-2 font-medium">Database</th>
+          <th scope="col" className="w-1/3 px-3 py-2 font-medium">Cakupan</th>
+          <th scope="col" className="px-3 py-2 text-right font-medium">Tabel tercakup</th>
+        </tr></thead>
+        <tbody>{rows.map(d => <tr key={d.name} onClick={onPick ? () => onPick(d.name) : undefined}
+          className={`border-t border-(--cui-color-stroke-default) ${onPick ? 'cursor-pointer hover:bg-(--cui-color-background-muted)' : ''} ${active === d.name ? 'bg-(--cui-color-background-muted) font-medium' : ''}`}>
+          <td className="max-w-56 truncate px-3 py-1.5 font-mono" title={d.name}>{d.name}</td>
+          <td className="px-3 py-1.5"><span className="flex items-center gap-2">
+            <span className="relative h-2 flex-1 overflow-hidden rounded-full bg-(--cui-color-stroke-default)" aria-hidden="true">
+              <span className={`absolute inset-y-0 left-0 ${TONE.approved.dot}`} style={{ width: `${pct(d) * 100}%` }} /></span>
+            <span className="w-10 text-right tabular-nums text-(--cui-color-text-muted)">{Math.round(pct(d) * 100)}%</span></span></td>
+          <td className="px-3 py-1.5 text-right tabular-nums">{whole.format(d.covered)} / {whole.format(d.tables)}</td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+    {onPick && <p className="text-xs text-(--cui-color-text-muted)">Klik database untuk melihat tabelnya di bawah.</p>}
+  </section>;
+}
+/** Per-database coverage: every table the admin's ClickHouse account can read, paged on the server. Keyed by database, so a switch starts at page 1. */
+function Coverage({ databases, current, setDatabase }: { databases: SemanticDatabase[]; current: string; setDatabase: (name: string) => void }) {
   const [text, setText] = useState(''), [q, setQ] = useState('');
   const [status, setStatus] = useState<TableStatus | undefined>(undefined);
   const [view, setView] = useState<View>({ page: 1, size: 25, sort: 'name', dir: 'asc' });
@@ -74,7 +108,6 @@ function Coverage({ databases }: { databases: SemanticDatabase[] }) {
     const timer = setTimeout(() => { setQ(text.trim()); setView(v => ({ ...v, page: 1 })); }, 300);
     return () => clearTimeout(timer);
   }, [text]);
-  const current = databases.some(d => d.name === database) ? database : databases[0]?.name ?? '';
   const query = useQuery({ queryKey: ['kaiSemantic', 'tables', current, status, q, view], enabled: !!current, retry: false, placeholderData: keepPreviousData,
     queryFn: () => semanticTablesFn({ data: { database: current, ...(status ? { status } : {}), ...(q ? { q } : {}), ...view } }) });
   const data = query.data?.database === current ? query.data : undefined;
@@ -85,7 +118,7 @@ function Coverage({ databases }: { databases: SemanticDatabase[] }) {
       <h2 className="text-sm font-medium">Cakupan per tabel</h2>
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1 text-sm">Database
-          <Select value={current} onChange={e => { setDatabase(e.target.value); setOpen(null); setView(v => ({ ...v, page: 1 })); }}>
+          <Select value={current} onChange={e => setDatabase(e.target.value)}>
             {databases.map(d => <option key={d.name} value={d.name}>{d.name} ({whole.format(d.tables)} tabel)</option>)}</Select>
         </label>
         <SearchInput value={text} onChange={setText} placeholder="Cari nama atau komentar tabel" ariaLabel="Cari tabel" className="min-w-56" />
@@ -112,6 +145,8 @@ export function Overview({ databases, canManage }: { databases: SemanticDatabase
   const counts = summary.data?.counts ?? {};
   const tables = databases?.reduce((n, d) => n + d.tables, 0) ?? 0;
   const covered = databases?.reduce((n, d) => n + d.covered, 0) ?? 0;
+  const [database, setDatabase] = useState('');
+  const current = databases?.some(d => d.name === database) ? database : databases?.[0]?.name ?? '';
   return <div className="flex flex-col gap-6">
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
       <Tile label="Disetujui" value={whole.format(counts.approved ?? 0)} hint="Dipakai agent" />
@@ -120,16 +155,8 @@ export function Overview({ databases, canManage }: { databases: SemanticDatabase
       <Tile label="Tabel tercakup" value={tables ? `${Math.round((covered / tables) * 100)}%` : '—'}
         hint={tables ? `${whole.format(covered)} dari ${whole.format(tables)} tabel` : 'Butuh akses ClickHouse akun Anda'} />
     </div>
-    {databases && databases.length > 0 && <figure className="flex flex-col gap-2">
-      <figcaption className="text-sm font-medium">Cakupan per database</figcaption>
-      <ul className="flex flex-col gap-2">{databases.map(d => <li key={d.name} className="grid grid-cols-[minmax(6rem,12rem)_1fr_auto] items-center gap-3 text-sm">
-        <span className="truncate font-mono" title={d.name}>{d.name}</span>
-        <span className="relative h-2.5 overflow-hidden rounded-full bg-(--cui-color-stroke-default)" role="img" aria-label={`${d.name}: ${d.covered} dari ${d.tables} tabel punya definisi`}>
-          <span className={`absolute inset-y-0 left-0 ${TONE.approved.dot}`} style={{ width: `${(d.covered / Math.max(d.tables, 1)) * 100}%` }} /></span>
-        <span className="tabular-nums text-(--cui-color-text-muted)">{whole.format(d.covered)} / {whole.format(d.tables)}</span>
-      </li>)}</ul>
-    </figure>}
-    {canManage && databases && databases.length > 0 && <Coverage databases={databases} />}
+    {databases && databases.length > 0 && <Databases databases={databases} active={canManage ? current : null} onPick={canManage ? setDatabase : undefined} />}
+    {canManage && databases && databases.length > 0 && <Coverage key={current} databases={databases} current={current} setDatabase={setDatabase} />}
     {!canManage && <p className="text-sm text-(--cui-color-text-muted)">Cakupan per tabel hanya tampil untuk admin yang boleh mengubah semantic layer.</p>}
     {canManage && databases?.length === 0 && <p className="text-sm text-(--cui-color-text-muted)">Akun ClickHouse Anda belum bisa membaca database apa pun.</p>}
   </div>;

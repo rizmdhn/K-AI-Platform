@@ -45,6 +45,7 @@ from comment_sql import suggest_comment_sql
 from semantic import register_semantic_routes
 from semantic_drafts import register_draft_routes
 from batch_jobs import get_row_labeling_job, register_job_routes, start_row_labeling
+from documents import create_document, register_file_routes
 from sql_tool import execute_readonly_sql
 from sql_policy import UnsafeSQL, validate
 from tool_errors import ERROR_OUTCOMES, GatewayError, error_payload
@@ -82,7 +83,7 @@ if os.getenv("KAI_CATALOG_DSN"):
     audit_store.attach(audit, os.environ["KAI_CATALOG_DSN"], _retention_days)  # query copy for the Admin Panel log
 SQL_FIELDS = {"run_query": "query", "execute_readonly_sql": "sql", "search_rows_by_meaning": "sql"}
 # Tools that also carry SQL (policy check + audit hash) but return no query rows, so no result limiting.
-CHECKED_SQL_FIELDS = {**SQL_FIELDS, "start_row_labeling": "sql"}
+CHECKED_SQL_FIELDS = {**SQL_FIELDS, "start_row_labeling": "sql", "create_document": "sql"}
 # Server-side ceilings sent with every query (P3-03), set in the Admin Panel (limits) or .env. The DBA settings
 # profile stays authoritative: any of these it locks (CONST/readonly) is dropped below and the profile value applies.
 def query_limits(values):
@@ -201,7 +202,8 @@ class PerUserClickHouse(Middleware):
                     "INVALID_ARGUMENT",
                     "Exactly sql and purpose are required; identity and other fields are not accepted.",
                 )
-            if tool in CHECKED_SQL_FIELDS:
+            # create_document's sql is optional (docx/pdf carry Markdown only).
+            if tool in CHECKED_SQL_FIELDS and not (tool == "create_document" and not query):
                 try:
                     validate(query)
                 except UnsafeSQL as error:
@@ -310,5 +312,7 @@ def setup_middleware(mcp):
     mcp.add_tool(Tool.from_function(suggest_comment_sql))
     mcp.add_tool(Tool.from_function(start_row_labeling))
     mcp.add_tool(Tool.from_function(get_row_labeling_job))
+    mcp.add_tool(Tool.from_function(create_document))
     register_job_routes(mcp)
+    register_file_routes(mcp)
     mcp.add_middleware(PerUserClickHouse())

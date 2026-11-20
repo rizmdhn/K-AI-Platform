@@ -38,10 +38,11 @@ export function DataTable<T>({
   };
   const first = total ? (page - 1) * size + 1 : 0;
   return <div className="flex flex-col gap-2">
-    <div className={cn('overflow-x-auto rounded-md border border-(--cui-color-stroke-default) transition-opacity', loading && 'opacity-60')}>
+    {/* Rows scroll inside the box (header stays), so a 100-row page never pushes the pager off screen. */}
+    <div className={cn('max-h-[65vh] overflow-auto rounded-md border border-(--cui-color-stroke-default) transition-opacity', loading && 'opacity-60')}>
       <table className="w-full text-left text-sm">
         <caption className="sr-only">{caption}</caption>
-        <thead className="bg-(--cui-color-background-muted) text-xs text-(--cui-color-text-muted)"><tr>
+        <thead className="sticky top-0 z-10 bg-(--cui-color-background-muted) text-xs text-(--cui-color-text-muted)"><tr>
           {selected && <th className="w-8 px-3 py-2"><input type="checkbox" aria-label="Pilih semua di halaman ini" checked={allPicked} onChange={toggleAll} disabled={!rows.length} /></th>}
           {columns.map(c => <th key={c.key} scope="col" aria-sort={sort === c.sortKey ? ARIA_SORT[dir] : undefined}
             className={cn('whitespace-nowrap px-3 py-2 font-medium', c.align === 'right' && 'text-right', c.className)}>{header(c)}</th>)}

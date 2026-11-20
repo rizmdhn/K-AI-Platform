@@ -97,7 +97,7 @@ function Issues({ job }: { job: SemanticJob }) {
   const more = job.drafts_skipped - job.issues.length;
   return <details className="text-sm">
     <summary className="cursor-pointer text-(--cui-color-text-muted)">Draf yang dilewati ({whole.format(job.drafts_skipped)}) beserta alasannya</summary>
-    <ul className="mt-2 flex flex-col gap-1">{job.issues.map((issue, i) => <li key={`${issue.item}-${i}`} className="wrap-break-word"><b className="font-medium">{issue.item}</b>: {issue.reason}</li>)}</ul>
+    <ul className="mt-2 flex max-h-64 flex-col gap-1 overflow-y-auto rounded-md border border-(--cui-color-stroke-default) p-2">{job.issues.map((issue, i) => <li key={`${issue.item}-${i}`} className="wrap-break-word"><b className="font-medium">{issue.item}</b>: {issue.reason}</li>)}</ul>
     {more > 0 && <p className="mt-1 text-xs text-(--cui-color-text-muted)">dan {whole.format(more)} lainnya.</p>}
   </details>;
 }

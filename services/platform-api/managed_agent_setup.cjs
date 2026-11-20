@@ -11,11 +11,12 @@ const TOOLS = [
   "suggest_comment_sql",
   "start_row_labeling",
   "get_row_labeling_job",
+  "create_document",
 ];
-// CH tool sets of earlier releases (before P4-08, AF-03, P4-04, AF-02): such an agent is upgraded in place
+// CH tool sets of earlier releases (before P4-08, AF-03, P4-04, AF-02, create_document): such an agent is upgraded in place
 // (same ID and ACL). New tools are appended to TOOLS, so each earlier set is a prefix. The last set carried the
 // short-lived chat drafting tool (18 Nov 2026), dropped again when drafting moved to the Admin Panel.
-const EARLIER_TOOL_SETS = [...[5, 6, 7, 8].map((count) => TOOLS.slice(0, count)), [...TOOLS, "propose_semantic_definition"]];
+const EARLIER_TOOL_SETS = [...[5, 6, 7, 8, 10].map((count) => TOOLS.slice(0, count)), [...TOOLS.slice(0, 10), "propose_semantic_definition"]];
 const sameSet = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
 // P2-10: the general agent searches the caller's own uploads (native ACL: file owner + agent access).
 const GENERAL_TOOLS = ["file_search"];
@@ -203,7 +204,7 @@ async function provisionManagedAgents(ownerId, deps) {
   const contact = { name: `Tim ${brand}`, email: "" };
   // Identity: introduce itself by the agent name, not the provider's model name. Never deny the underlying model.
   const identity = (name) =>
-    `Kamu adalah ${name}, asisten AI internal ${brand}. Saat ditanya siapa kamu, perkenalkan diri sebagai ${name}. Jangan memperkenalkan diri dengan nama model atau pembuatnya. Jika ditanya model AI apa yang dipakai, jawab bahwa ${name} berjalan di atas model AI yang dipilih dan dikelola tim ${brand}, dan detail teknisnya bisa ditanyakan ke administrator. `;
+    `Kamu adalah ${name}, asisten AI internal ${brand}. Jangan memperkenalkan diri atau membuka jawaban dengan salam; langsung jawab pertanyaannya. Perkenalkan diri sebagai ${name} hanya bila ditanya siapa kamu. Jangan memperkenalkan diri dengan nama model atau pembuatnya. Jika ditanya model AI apa yang dipakai, jawab bahwa ${name} berjalan di atas model AI yang dipilih dan dikelola tim ${brand}, dan detail teknisnya bisa ditanyakan ke administrator. `;
   const generalProfile = {
     name: GENERAL_NAME,
     legacyName: `${brand} - Umum`,
