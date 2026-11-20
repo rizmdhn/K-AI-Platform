@@ -10,6 +10,7 @@ const TOOL_NAMES = [
   "suggest_comment_sql",
   "start_row_labeling",
   "get_row_labeling_job",
+  "create_document",
 ];
 const USER_FIELDS =
   "_id role tenantId kaiAccount.status deleted deletedAt disabled active";
